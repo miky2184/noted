@@ -453,6 +453,100 @@ def uninstall(
     console.print("[dim]I tuoi dati (note, DB, configurazione) non sono stati toccati.[/dim]")
 
 
+# ── RESTART ────────────────────────────────────────────────────────────────────
+
+def _restart_service() -> None:
+    """Riavvia il servizio noted sulla piattaforma corrente."""
+    import subprocess
+    from cli.installer import LAUNCHD_PLIST, LAUNCHD_LABEL, SYSTEMD_UNIT, TASK_NAME
+
+    system = sys.platform
+    if system == "darwin":
+        subprocess.run(["launchctl", "unload", str(LAUNCHD_PLIST)], capture_output=True)
+        subprocess.run(["launchctl", "load", str(LAUNCHD_PLIST)], check=True)
+    elif system.startswith("linux"):
+        subprocess.run(["systemctl", "--user", "restart", "noted"], check=True)
+    elif system == "win32":
+        subprocess.run(["schtasks", "/End", "/TN", TASK_NAME], capture_output=True)
+        subprocess.run(["schtasks", "/Run", "/TN", TASK_NAME], check=True)
+    else:
+        raise RuntimeError(f"Piattaforma non supportata: {system}")
+
+
+@app.command()
+def restart():
+    """Riavvia il servizio noted (dopo modifiche al codice o alla configurazione)."""
+    try:
+        _restart_service()
+        console.print("✅ [green]noted riavviato.[/green]")
+    except Exception as e:
+        console.print(f"[red]Errore durante il riavvio: {e}[/red]")
+        console.print("[dim]Hai eseguito 'noted install'?[/dim]")
+        raise typer.Exit(1)
+
+
+# ── UPGRADE ────────────────────────────────────────────────────────────────────
+
+@app.command()
+def upgrade(
+    no_restart: bool = typer.Option(False, "--no-restart", help="Non riavviare il servizio dopo l'aggiornamento"),
+):
+    """Aggiorna noted: git pull + pip install + restart."""
+    import subprocess
+
+    project_root = Path(__file__).parent.parent.resolve()
+
+    if not (project_root / ".git").exists():
+        console.print("[red]La cartella del progetto non è un repository git.[/red]")
+        console.print(f"[dim]Cartella rilevata: {project_root}[/dim]")
+        raise typer.Exit(1)
+
+    # 1. git pull
+    console.print("[cyan]Scarico gli aggiornamenti...[/cyan]")
+    result = subprocess.run(
+        ["git", "pull", "--ff-only"],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        console.print(f"[red]git pull fallito:[/red]\n{result.stderr.strip()}")
+        console.print("[dim]Controlla che non ci siano modifiche locali non committate (git status).[/dim]")
+        raise typer.Exit(1)
+
+    if "Already up to date" in result.stdout:
+        console.print("[green]Già aggiornato — nessuna modifica da applicare.[/green]")
+        return
+
+    console.print(result.stdout.strip())
+
+    # 2. reinstalla dipendenze se pyproject.toml è cambiato
+    changed_files = result.stdout
+    if "pyproject.toml" in changed_files:
+        console.print("[cyan]pyproject.toml modificato — reinstallo le dipendenze...[/cyan]")
+        pip_result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-e", ".", "-q"],
+            cwd=project_root,
+        )
+        if pip_result.returncode != 0:
+            console.print("[red]pip install fallito. Esegui manualmente: pip install -e .[/red]")
+            raise typer.Exit(1)
+        console.print("✅ [green]Dipendenze aggiornate.[/green]")
+
+    # 3. restart
+    if no_restart:
+        console.print("[dim]Restart saltato (--no-restart). Riavvia manualmente con: noted restart[/dim]")
+        return
+
+    console.print("[cyan]Riavvio il servizio...[/cyan]")
+    try:
+        _restart_service()
+        console.print("✅ [green]noted aggiornato e riavviato.[/green]")
+    except Exception as e:
+        console.print(f"[yellow]Aggiornamento applicato ma restart fallito: {e}[/yellow]")
+        console.print("[dim]Riavvia manualmente con: noted restart[/dim]")
+
+
 # ── INSTALL-CRON ───────────────────────────────────────────────────────────────
 
 @app.command(name="install-cron")

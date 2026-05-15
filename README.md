@@ -142,6 +142,9 @@ noted install --port 8080           # usa una porta diversa
 noted install --no-hosts            # non modifica /etc/hosts
 noted uninstall                     # rimuove il servizio
 noted uninstall --keep-hosts        # rimuove il servizio ma lascia /etc/hosts
+noted restart                       # riavvia il servizio (dopo modifiche al codice)
+noted upgrade                       # git pull + pip install + restart automatico
+noted upgrade --no-restart          # aggiorna il codice senza riavviare subito
 ```
 
 ### Recap automatico via cron (opzionale)
