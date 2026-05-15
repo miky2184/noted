@@ -1,4 +1,8 @@
-# noted 📝
+<p align="center">
+  <img src="web/static/logo.png" width="96" alt="noted logo">
+</p>
+
+# noted
 
 Appunti giornalieri con recap AI. Dashboard web locale, avvio automatico al boot, accessibile da browser come `noted.local`.
 

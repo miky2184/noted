@@ -56,6 +56,7 @@ def add(
     priority: str = typer.Option("medium", "--priority", "-P", help="Priorità: low | medium | high"),
     due: Optional[str] = typer.Option(None, "--due", "-d", help="Scadenza: YYYY-MM-DD"),
     status: Optional[str] = typer.Option(None, "--status", "-s", help="Stato: todo | wip | done | blocked"),
+    assignee: Optional[str] = typer.Option(None, "--assignee", "-a", help="Assegna a: 'mario' o '@mario'"),
 ):
     """Aggiungi una nota."""
     _init()
@@ -72,14 +73,18 @@ def add(
     if status and status not in ("todo", "wip", "done", "blocked"):
         console.print("[red]Stato non valido. Usa: todo | wip | done | blocked[/red]")
         raise typer.Exit(1)
+    # Strip leading @ from assignee if present
+    if assignee:
+        assignee = assignee.lstrip("@")
     with get_session() as session:
-        note = crud.add_note(session, content=content, tags=tag, project=project, priority=priority, due_date=due_date, status=status)
+        note = crud.add_note(session, content=content, tags=tag, project=project, priority=priority, due_date=due_date, status=status, assignee=assignee)
     color = PRIORITY_COLORS[note.priority]
     proj_str = f" [{note.project}]" if note.project else ""
     tag_str = f" #{note.tags}" if note.tags else ""
     due_str = f" 📅 {note.due_date}" if note.due_date else ""
     status_str = f" {STATUS_ICONS.get(note.status, '')} {note.status}" if note.status else ""
-    console.print(f"✅ [green]Nota #{note.id} salvata[/green]{proj_str}{tag_str} [{color}]{note.priority}[/{color}]{due_str}{status_str}")
+    assignee_str = f" @{note.assignee}" if note.assignee else ""
+    console.print(f"✅ [green]Nota #{note.id} salvata[/green]{proj_str}{tag_str} [{color}]{note.priority}[/{color}]{due_str}{status_str}{assignee_str}")
 
 
 # ── LIST ───────────────────────────────────────────────────────────────────────
@@ -89,6 +94,7 @@ def list_notes(
     today: bool = typer.Option(False, "--today", help="Solo note di oggi"),
     tag: Optional[str] = typer.Option(None, "--tag", "-t", help="Filtra per tag"),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Filtra per progetto"),
+    assignee: Optional[str] = typer.Option(None, "--assignee", "-a", help="Filtra per assegnatario"),
     limit: int = typer.Option(20, "--limit", "-n", help="Numero massimo di note"),
     date_str: Optional[str] = typer.Option(None, "--date", "-d", help="Data specifica: YYYY-MM-DD"),
 ):
@@ -106,7 +112,7 @@ def list_notes(
             raise typer.Exit(1)
 
     with get_session() as session:
-        notes = crud.get_notes(session, day=target_date, tag=tag, project=project, limit=limit)
+        notes = crud.get_notes(session, day=target_date, tag=tag, project=project, assignee=assignee, limit=limit)
 
     if not notes:
         console.print("[yellow]Nessuna nota trovata.[/yellow]")
@@ -174,6 +180,7 @@ def edit(
     clear_due: bool = typer.Option(False, "--clear-due", help="Rimuovi la scadenza"),
     status: Optional[str] = typer.Option(None, "--status", "-s", help="Stato: todo | wip | done | blocked"),
     clear_status: bool = typer.Option(False, "--clear-status", help="Rimuovi lo stato"),
+    assignee: Optional[str] = typer.Option(None, "--assignee", "-a", help="Assegna a: 'mario' o '@mario'"),
 ):
     """Modifica una nota esistente."""
     _init()
@@ -190,8 +197,10 @@ def edit(
         except ValueError:
             console.print("[red]Formato data non valido. Usa YYYY-MM-DD[/red]")
             raise typer.Exit(1)
+    if assignee:
+        assignee = assignee.lstrip("@")
     with get_session() as session:
-        note = crud.edit_note(session, note_id, content=content, priority=priority, due_date=due_date, clear_due=clear_due, status=status, clear_status=clear_status)
+        note = crud.edit_note(session, note_id, content=content, priority=priority, due_date=due_date, clear_due=clear_due, status=status, clear_status=clear_status, assignee=assignee)
     if note:
         console.print(f"✏️  [green]Nota #{note_id} aggiornata.[/green]")
     else:

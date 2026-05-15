@@ -14,8 +14,9 @@ def add_note(
     priority: str = "medium",
     due_date: Optional[date] = None,
     status: Optional[str] = None,
+    assignee: Optional[str] = None,
 ) -> Note:
-    note = Note(content=content, tags=tags, project=project, priority=priority, due_date=due_date, status=status)
+    note = Note(content=content, tags=tags, project=project, priority=priority, due_date=due_date, status=status, assignee=assignee)
     session.add(note)
     session.commit()
     session.refresh(note)
@@ -28,6 +29,8 @@ def get_notes(
     tag: Optional[str] = None,
     project: Optional[str] = None,
     priority: Optional[str] = None,
+    assignee: Optional[str] = None,
+    status: Optional[str] = None,
     limit: int = 50,
 ) -> list[Note]:
     stmt = select(Note)
@@ -46,6 +49,12 @@ def get_notes(
     if priority:
         stmt = stmt.where(Note.priority == priority)
 
+    if assignee:
+        stmt = stmt.where(Note.assignee.ilike(f"%{assignee}%"))
+
+    if status:
+        stmt = stmt.where(Note.status == status)
+
     stmt = stmt.order_by(Note.created_at.desc()).limit(limit)
     return session.exec(stmt).all()
 
@@ -63,6 +72,7 @@ def edit_note(
     clear_due: bool = False,
     status: Optional[str] = None,
     clear_status: bool = False,
+    assignee: Optional[str] = None,
 ) -> Optional[Note]:
     note = session.get(Note, note_id)
     if not note:
@@ -79,11 +89,31 @@ def edit_note(
         note.status = None
     elif status is not None:
         note.status = status
+    if assignee is not None:
+        note.assignee = assignee if assignee else None
     note.updated_at = datetime.now()
     session.add(note)
     session.commit()
     session.refresh(note)
     return note
+
+
+def get_board_notes(
+    session: Session,
+    project: Optional[str] = None,
+    assignee: Optional[str] = None,
+) -> list[Note]:
+    """Return all notes with a status set, for the board view."""
+    stmt = select(Note).where(Note.status.isnot(None))
+
+    if project:
+        stmt = stmt.where(Note.project.ilike(f"%{project}%"))
+
+    if assignee:
+        stmt = stmt.where(Note.assignee.ilike(f"%{assignee}%"))
+
+    stmt = stmt.order_by(Note.created_at.desc()).limit(500)
+    return session.exec(stmt).all()
 
 
 def delete_note(session: Session, note_id: int) -> bool:

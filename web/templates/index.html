@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>noted — {{ today.strftime('%d/%m/%Y') }}</title>
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<link rel="apple-touch-icon" href="/static/logo-180.png">
+<meta name="theme-color" content="#0d1033">
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -66,8 +69,10 @@
     top: 0;
     z-index: 100;
   }
-  .header-logo { font-size: 1rem; font-weight: 700; color: var(--accent); letter-spacing: -0.02em; }
-  .header-logo span { color: var(--text-muted); font-weight: 400; }
+  .header-logo { display: flex; align-items: center; gap: 8px; text-decoration: none; }
+  .header-logo img { width: 28px; height: 28px; border-radius: 7px; }
+  .header-logo-text { font-size: 1rem; font-weight: 700; color: var(--accent); letter-spacing: -0.02em; }
+  .header-logo-text span { color: var(--text-muted); font-weight: 400; }
 
   .date-nav { display: flex; align-items: center; gap: 8px; margin-left: auto; }
   .date-nav button {
@@ -110,7 +115,7 @@
   .add-form textarea::placeholder { color: var(--text-dim); }
   .add-form-footer {
     display: flex; align-items: center; gap: 8px; margin-top: 8px; padding-top: 8px;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--border); flex-wrap: wrap;
   }
   .add-form input[type="text"] {
     background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
@@ -149,7 +154,7 @@
   }
   .note-item:hover { border-color: var(--border-hover); }
   .note-item:hover .delete-btn { opacity: 1; }
-  .note-meta { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+  .note-meta { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; flex-wrap: wrap; }
   .note-time { font-size: 0.72rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
   .tag {
     font-size: 0.68rem; background: var(--accent-dim); color: var(--accent);
@@ -329,18 +334,72 @@
   /* ── Refresh indicator ───────────────────────────────── */
   .refresh-dot {
     width: 6px; height: 6px; border-radius: 50%; background: var(--text-dim);
-    margin-left: auto; transition: background 0.3s;
+    transition: background 0.3s;
   }
   .refresh-dot.active { background: var(--green); }
+
+  /* ── Board ───────────────────────────────────────────── */
+  #view-board { display: none; }
+  .board-filters { display: flex; gap: 8px; margin-bottom: 14px; align-items: center; flex-wrap: wrap; }
+  .board-filter-input { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-family: inherit; font-size: 0.8rem; padding: 5px 10px; outline: none; width: 160px; transition: border-color 0.15s; }
+  .board-filter-input:focus { border-color: var(--accent); }
+  .board-filter-input::placeholder { color: var(--text-dim); }
+  .board-container { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; align-items: start; }
+  .board-col { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); display: flex; flex-direction: column; max-height: calc(100vh - 200px); }
+  .board-col-header { padding: 10px 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .board-col-title { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+  .board-col-body { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+  .board-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; transition: border-color 0.15s; border-left: 3px solid transparent; position: relative; }
+  .board-card:hover { border-color: var(--border-hover); }
+  .board-card:hover .delete-btn { opacity: 1; }
+  .board-card.priority-high { border-left-color: var(--red); }
+  .board-card.priority-medium { border-left-color: var(--yellow); }
+  .board-card.priority-low { border-left-color: var(--green); }
+  .board-card-content { font-size: 0.85rem; color: var(--text); line-height: 1.45; margin-bottom: 6px; cursor: text; border-radius: 4px; padding: 2px 4px; margin-left: -4px; transition: background 0.15s; }
+  .board-card-content:hover { background: rgba(255,255,255,0.04); }
+  .board-card-content[contenteditable="true"] { outline: none; background: rgba(129,140,248,0.08); box-shadow: 0 0 0 1px var(--accent); }
+  .board-card-meta { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+
+  /* ── Assignee ────────────────────────────────────────── */
+  .assignee-badge { font-size: 0.65rem; background: var(--surface); border: 1px solid var(--border); color: var(--text-muted); padding: 1px 6px; border-radius: 8px; white-space: nowrap; }
+
+  /* ── Focus section ───────────────────────────────────── */
+  .focus-section { margin-bottom: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .focus-header { display: flex; align-items: center; gap: 8px; padding: 9px 14px; border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; }
+  .focus-header:hover { background: var(--surface2); }
+  .focus-toggle { font-size: 0.65rem; color: var(--text-dim); margin-left: auto; }
+  .focus-body { padding: 10px 14px; display: flex; flex-direction: column; gap: 10px; }
+  .focus-group-label { font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 5px; }
+  .focus-card { display: flex; align-items: flex-start; gap: 8px; padding: 7px 9px; background: var(--surface2); border-radius: 7px; border-left: 3px solid; margin-bottom: 4px; }
+  .focus-card.wip { border-left-color: var(--yellow); }
+  .focus-card.blocked { border-left-color: var(--red); }
+  .focus-card.due-today { border-left-color: var(--accent); }
+  .focus-card-content { font-size: 0.82rem; color: var(--text); line-height: 1.4; flex: 1; min-width: 0; }
+  .focus-card-meta { display: flex; gap: 4px; margin-top: 3px; flex-wrap: wrap; align-items: center; }
+
+  /* ── Shortcuts modal ─────────────────────────────────── */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 300; display: none; align-items: center; justify-content: center; }
+  .modal-overlay.show { display: flex; }
+  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px 24px; min-width: 300px; box-shadow: 0 8px 40px rgba(0,0,0,0.4); }
+  .modal-title { font-size: 0.85rem; font-weight: 700; margin-bottom: 14px; color: var(--text); }
+  .shortcut-row { display: flex; align-items: center; justify-content: space-between; padding: 5px 0; font-size: 0.82rem; color: var(--text-muted); border-bottom: 1px solid var(--border); }
+  .shortcut-row:last-child { border-bottom: none; }
+  .kbd { background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; font-family: monospace; font-size: 0.75rem; color: var(--text-muted); }
+  .shortcuts-btn { background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); width: 28px; height: 28px; border-radius: 6px; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; transition: all 0.15s; font-family: monospace; font-weight: 700; }
+  .shortcuts-btn:hover { border-color: var(--border-hover); color: var(--text); }
 </style>
 </head>
 <body>
 
 <div class="header">
-  <div class="header-logo">noted<span>.app</span></div>
+  <a class="header-logo" href="/" title="noted">
+    <img src="/static/logo.png" alt="noted logo">
+    <span class="header-logo-text">noted<span>.app</span></span>
+  </a>
 
   <div class="tabs">
-    <button class="tab-btn active" id="tab-notes" onclick="switchTab('notes')">📝 Note</button>
+    <button class="tab-btn active" id="tab-notes" onclick="switchTab('notes')">📝 Oggi</button>
+    <button class="tab-btn" id="tab-board" onclick="switchTab('board')">🗂 Board</button>
     <button class="tab-btn" id="tab-due" onclick="switchTab('due')">📅 Scadenze</button>
   </div>
 
@@ -351,7 +410,8 @@
     <button class="today-btn" id="today-btn">oggi</button>
   </div>
 
-  <div class="refresh-dot" id="refresh-dot" title="Auto-refresh attivo"></div>
+  <div class="refresh-dot" id="refresh-dot" title="Auto-refresh attivo" style="margin-left:auto"></div>
+  <button class="shortcuts-btn" id="shortcuts-btn" onclick="toggleShortcuts()" title="Scorciatoie da tastiera (?)">?</button>
   <button class="theme-btn" id="theme-toggle" title="Cambia tema">🌙</button>
 </div>
 
@@ -363,6 +423,7 @@
       <div class="add-form-footer">
         <input type="text" id="note-tag" placeholder="#tag" maxlength="60">
         <input type="text" id="note-project" placeholder="progetto" maxlength="60">
+        <input type="text" id="note-assignee" placeholder="@persona" maxlength="60">
         <input type="date" id="note-due" title="Scadenza" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-family:inherit;font-size:0.78rem;padding:4px 8px;outline:none;width:130px;transition:border-color 0.15s;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
         <select id="note-status" title="Stato" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-family:inherit;font-size:0.78rem;padding:4px 8px;outline:none;cursor:pointer;">
           <option value="">— stato</option>
@@ -380,6 +441,16 @@
       </div>
     </form>
 
+    <!-- Focus section (shown on today's tab when there are WIP/Blocked/Due-today items) -->
+    <div class="focus-section" id="focus-section" style="display:none">
+      <div class="focus-header" onclick="toggleFocus()">
+        <span class="section-title">Focus</span>
+        <span id="focus-counts" style="font-size:0.75rem;color:var(--text-muted)"></span>
+        <span class="focus-toggle" id="focus-toggle">▲</span>
+      </div>
+      <div class="focus-body" id="focus-body"></div>
+    </div>
+
     <!-- Filters -->
     <div id="filter-bar" class="filter-bar" style="display:none"></div>
 
@@ -390,6 +461,18 @@
         <span class="count-badge" id="notes-count">0</span>
       </div>
       <div id="notes-list"></div>
+    </div>
+
+    <!-- Board view -->
+    <div id="view-board">
+      <div class="board-filters">
+        <input class="board-filter-input" id="board-project-filter" placeholder="filtra per progetto" onkeydown="if(event.key==='Enter') loadBoard()">
+        <input class="board-filter-input" id="board-assignee-filter" placeholder="filtra per @persona" onkeydown="if(event.key==='Enter') loadBoard()">
+        <button onclick="loadBoard()" style="background:var(--accent-dim);border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:5px 12px;font-size:0.78rem;cursor:pointer;">Filtra</button>
+        <button onclick="clearBoardFilters()" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:6px;padding:5px 10px;font-size:0.78rem;cursor:pointer;">✕</button>
+        <div class="refresh-dot" id="board-refresh-dot" style="margin-left:auto"></div>
+      </div>
+      <div class="board-container" id="board-container"></div>
     </div>
 
     <!-- Due items view -->
@@ -452,6 +535,20 @@
 
 <div id="toast"></div>
 
+<!-- Shortcuts modal -->
+<div class="modal-overlay" id="shortcuts-modal" onclick="closeShortcuts(event)">
+  <div class="modal">
+    <div class="modal-title">Scorciatoie da tastiera</div>
+    <div class="shortcut-row"><span>Nuova nota</span><kbd class="kbd">N</kbd></div>
+    <div class="shortcut-row"><span>Tab Oggi</span><kbd class="kbd">1</kbd></div>
+    <div class="shortcut-row"><span>Tab Board</span><kbd class="kbd">2</kbd></div>
+    <div class="shortcut-row"><span>Tab Scadenze</span><kbd class="kbd">3</kbd></div>
+    <div class="shortcut-row"><span>Chiudi/Annulla</span><kbd class="kbd">Esc</kbd></div>
+    <div class="shortcut-row"><span>Questa finestra</span><kbd class="kbd">?</kbd></div>
+    <div style="margin-top:12px;font-size:0.72rem;color:var(--text-muted)">Nell'editor: <kbd class="kbd">Enter</kbd> salva · <kbd class="kbd">Shift+Enter</kbd> a capo · <kbd class="kbd">Esc</kbd> annulla</div>
+  </div>
+</div>
+
 <script>
 // ── State ─────────────────────────────────────────────────────────────────────
 let currentDate = '{{ today.isoformat() }}';
@@ -479,14 +576,18 @@ document.getElementById('theme-toggle').addEventListener('click', () => {
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 function switchTab(tab) {
   activeTab = tab;
-  document.getElementById('tab-notes').classList.toggle('active', tab === 'notes');
-  document.getElementById('tab-due').classList.toggle('active', tab === 'due');
+  ['notes', 'board', 'due'].forEach(t => {
+    document.getElementById(`tab-${t}`).classList.toggle('active', t === tab);
+  });
   document.getElementById('view-notes').style.display = tab === 'notes' ? 'block' : 'none';
+  document.getElementById('view-board').style.display = tab === 'board' ? 'block' : 'none';
   document.getElementById('view-due').style.display = tab === 'due' ? 'block' : 'none';
   document.getElementById('date-nav').style.display = tab === 'notes' ? '' : 'none';
   document.getElementById('add-form').style.display = tab === 'notes' && isToday(currentDate) ? '' : 'none';
+  document.getElementById('focus-section').style.display = (tab === 'notes' && isToday(currentDate)) ? '' : 'none';
   document.getElementById('filter-bar').style.display = 'none';
   if (tab === 'due') loadDueNotes();
+  if (tab === 'board') loadBoard();
 }
 
 // ── Markdown recap init ───────────────────────────────────────────────────────
@@ -548,13 +649,14 @@ function renderDueNotes(notes) {
       const statusHtml = n.status ? `<span class="status status-${n.status}" onclick="cycleStatus(${n.id},'${n.status||''}')" title="Cambia stato">${STATUS_LABEL[n.status]}</span>` : `<span class="status status-empty" onclick="cycleStatus(${n.id},'')" title="Aggiungi stato">+ stato</span>`;
       const priorityHtml = `<span class="priority priority-${n.priority}" onclick="cyclePriority(${n.id},'${n.priority}')" title="Cambia priorità">${n.priority}</span>`;
       const projHtml = n.project ? `<span class="project-badge">${escHtml(n.project)}</span>` : '';
+      const assigneeHtml = n.assignee ? `<span class="assignee-badge">@${escHtml(n.assignee)}</span>` : '';
       return `
       <div class="due-item ${dateCls}" data-id="${n.id}">
         <div class="due-item-date ${dateCls}">📅 ${n.due_date}</div>
         <div class="due-item-body">
           <div class="due-item-content" onclick="startEdit(this,${n.id})" title="Clicca per modificare">${escHtml(n.content)}</div>
           <div class="due-item-meta">
-            ${statusHtml}${priorityHtml}${projHtml}
+            ${statusHtml}${priorityHtml}${projHtml}${assigneeHtml}
             ${n.tags.map(t=>`<span class="tag">#${escHtml(t)}</span>`).join('')}
           </div>
         </div>
@@ -581,6 +683,7 @@ function navigateToDate(isoDate) {
   document.getElementById('notes-section-label').textContent =
     isToday(isoDate) ? 'Note di oggi' : `Note del ${formatDateLabel(isoDate)}`;
   document.getElementById('add-form').style.display = isToday(isoDate) ? '' : 'none';
+  document.getElementById('focus-section').style.display = (activeTab === 'notes' && isToday(isoDate)) ? '' : 'none';
   loadNotes();
   resetRefresh();
 }
@@ -618,6 +721,7 @@ async function loadNotes() {
     const notes = await res.json();
     renderNotes(notes);
     renderFilterBar();
+    if (isToday(currentDate)) loadFocus();
   } catch(e) {
     console.error(e);
   }
@@ -643,12 +747,14 @@ function renderNotes(notes) {
       const cls = isOverdue ? 'overdue' : isSoon ? 'soon' : '';
       return `<span class="due-date ${cls}">📅 ${n.due_date}</span>`;
     })() : '';
+    const assigneeHtml = n.assignee ? `<span class="assignee-badge">@${escHtml(n.assignee)}</span>` : '';
     return `
     <div class="note-item" data-id="${n.id}">
       <div class="note-meta">
         <span class="note-time">${n.created_at.slice(11, 16)}</span>
         ${n.project ? `<span class="project-badge" onclick="filterBy('project','${escHtml(n.project)}')">${escHtml(n.project)}</span>` : ''}
         ${n.tags.map(t => `<span class="tag" onclick="filterBy('tag','${escHtml(t)}')">#${escHtml(t)}</span>`).join('')}
+        ${assigneeHtml}
         <span class="status ${n.status ? 'status-'+n.status : 'status-empty'}" onclick="cycleStatus(${n.id},'${n.status||''}')" title="Clicca per cambiare stato">${n.status ? STATUS_LABEL[n.status] : '+ stato'}</span>
         <span class="priority priority-${n.priority}" onclick="cyclePriority(${n.id},'${n.priority}')" title="Clicca per cambiare priorità">${n.priority}</span>
         <span class="due-date${n.due_date ? (n.due_date < today ? ' overdue' : (n.due_date <= new Date(Date.now()+2*86400000).toISOString().slice(0,10) ? ' soon' : '')) : ' due-empty'}" onclick="editDue(this,${n.id},'${n.due_date||''}')" title="Clicca per impostare scadenza">${n.due_date ? '📅 '+n.due_date : '+ scadenza'}</span>
@@ -709,6 +815,7 @@ document.getElementById('add-form').addEventListener('submit', async e => {
         content,
         tags: document.getElementById('note-tag').value.replace(/^#/, '').trim(),
         project: document.getElementById('note-project').value.trim() || null,
+        assignee: document.getElementById('note-assignee').value.replace(/^@/, '').trim() || null,
         priority: document.getElementById('note-priority').value,
         due_date: document.getElementById('note-due').value || null,
         status: document.getElementById('note-status').value || null,
@@ -719,6 +826,7 @@ document.getElementById('add-form').addEventListener('submit', async e => {
     textarea.style.height = 'auto';
     document.getElementById('note-tag').value = '';
     document.getElementById('note-project').value = '';
+    document.getElementById('note-assignee').value = '';
     document.getElementById('note-due').value = '';
     document.getElementById('note-priority').value = 'medium';
     document.getElementById('note-status').value = '';
@@ -738,7 +846,9 @@ async function deleteNote(id) {
   try {
     const res = await fetch(`/api/notes/${id}`, { method: 'DELETE' });
     if (!res.ok) throw new Error();
-    activeTab === 'due' ? await loadDueNotes() : await loadNotes();
+    if (activeTab === 'board') await loadBoard();
+    else if (activeTab === 'due') await loadDueNotes();
+    else await loadNotes();
     toast('Nota eliminata');
   } catch {
     if (card) card.style.opacity = '1';
@@ -763,13 +873,20 @@ function startEdit(el, noteId) {
   sel.removeAllRanges();
   sel.addRange(range);
 
-  function save() {
+  async function save() {
     el.contentEditable = 'false';
     const newContent = el.textContent.trim();
     if (!newContent || newContent === original) { el.textContent = original; return; }
-    patchNote(noteId, { content: newContent })
-      .then(() => toast('Nota aggiornata', 'success'))
-      .catch(() => { el.textContent = original; toast('Errore salvataggio', 'error'); });
+    try {
+      await patchNote(noteId, { content: newContent });
+      toast('Nota aggiornata', 'success');
+      if (activeTab === 'board') await loadBoard();
+      else if (activeTab === 'due') await loadDueNotes();
+      else await loadNotes();
+    } catch {
+      el.textContent = original;
+      toast('Errore salvataggio', 'error');
+    }
   }
 
   el.onblur = save;
@@ -785,7 +902,9 @@ async function cycleStatus(noteId, currentStatus) {
   try {
     await patchNote(noteId, { status: next === null ? '' : next });
     toast(next ? `Stato: ${next}` : 'Stato rimosso');
-    activeTab === 'due' ? await loadDueNotes() : await loadNotes();
+    if (activeTab === 'board') await loadBoard();
+    else if (activeTab === 'due') await loadDueNotes();
+    else { await loadNotes(); }
   } catch { toast('Errore aggiornamento stato', 'error'); }
 }
 
@@ -929,6 +1048,165 @@ async function setModel(modelId) {
     if (sel) sel.value = data.model;
   } catch {}
 })();
+
+// ── Board ─────────────────────────────────────────────────────────────────────
+async function loadBoard() {
+  const dot = document.getElementById('board-refresh-dot');
+  if (dot) { dot.classList.add('active'); setTimeout(() => dot.classList.remove('active'), 600); }
+  const project = document.getElementById('board-project-filter').value.trim();
+  const assignee = document.getElementById('board-assignee-filter').value.trim();
+  const params = new URLSearchParams();
+  if (project) params.set('project', project);
+  if (assignee) params.set('assignee', assignee);
+  try {
+    const res = await fetch('/api/board?' + params);
+    const data = await res.json();
+    renderBoard(data);
+  } catch(e) { console.error(e); }
+}
+
+function clearBoardFilters() {
+  document.getElementById('board-project-filter').value = '';
+  document.getElementById('board-assignee-filter').value = '';
+  loadBoard();
+}
+
+function renderBoard(data) {
+  const container = document.getElementById('board-container');
+  const today = new Date().toISOString().slice(0,10);
+  const COLS = [
+    { key: 'todo',    label: '⬜ Todo',      color: 'var(--blue)' },
+    { key: 'wip',     label: '🔄 In corso',  color: 'var(--yellow)' },
+    { key: 'blocked', label: '🚫 Bloccati',  color: 'var(--red)' },
+    { key: 'done',    label: '✅ Done',       color: 'var(--green)' },
+  ];
+  container.innerHTML = COLS.map(col => {
+    const notes = data[col.key] || [];
+    return `
+    <div class="board-col">
+      <div class="board-col-header">
+        <span class="board-col-title" style="color:${col.color}">${col.label}</span>
+        <span class="count-badge">${notes.length}</span>
+      </div>
+      <div class="board-col-body">
+        ${notes.length ? notes.map(n => boardCard(n, today)).join('') : '<div style="color:var(--text-dim);font-size:0.8rem;padding:8px 4px;text-align:center;">—</div>'}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function boardCard(n, today) {
+  const assigneeHtml = n.assignee ? `<span class="assignee-badge">@${escHtml(n.assignee)}</span>` : '';
+  const projHtml = n.project ? `<span class="project-badge">${escHtml(n.project)}</span>` : '';
+  const dueHtml = n.due_date ? `<span class="due-date ${n.due_date < today ? 'overdue' : (n.due_date === today ? 'soon' : '')}" style="font-size:0.65rem">📅 ${n.due_date}</span>` : '';
+  return `
+  <div class="board-card priority-${n.priority}" data-id="${n.id}">
+    <div class="board-card-content" onclick="startEdit(this,${n.id})" title="Clicca per modificare">${escHtml(n.content)}</div>
+    <div class="board-card-meta">
+      ${projHtml}${assigneeHtml}
+      <span class="status status-${n.status}" onclick="cycleStatus(${n.id},'${n.status||''}')" title="Avanza stato" style="cursor:pointer">${STATUS_LABEL[n.status]||''}</span>
+      ${dueHtml}
+      <button class="delete-btn" onclick="deleteNote(${n.id})" title="Elimina" style="margin-left:auto;opacity:0">✕</button>
+    </div>
+  </div>`;
+}
+
+// ── Focus ─────────────────────────────────────────────────────────────────────
+let focusCollapsed = false;
+
+async function loadFocus() {
+  if (!isToday(currentDate)) {
+    document.getElementById('focus-section').style.display = 'none';
+    return;
+  }
+  try {
+    const res = await fetch('/api/focus');
+    const data = await res.json();
+    renderFocus(data);
+  } catch(e) { console.error(e); }
+}
+
+function renderFocus(data) {
+  const section = document.getElementById('focus-section');
+  const total = data.wip.length + data.blocked.length + data.due_today.length;
+  if (!total) { section.style.display = 'none'; return; }
+  section.style.display = 'block';
+
+  const counts = [];
+  if (data.blocked.length) counts.push(`🚫 ${data.blocked.length}`);
+  if (data.wip.length) counts.push(`🔄 ${data.wip.length}`);
+  if (data.due_today.length) counts.push(`🔴 ${data.due_today.length}`);
+  document.getElementById('focus-counts').textContent = counts.join('  ');
+
+  let html = '';
+  if (data.blocked.length) {
+    html += `<div><div class="focus-group-label" style="color:var(--red)">🚫 Bloccati</div>${data.blocked.map(n => focusCard(n,'blocked')).join('')}</div>`;
+  }
+  if (data.wip.length) {
+    html += `<div><div class="focus-group-label" style="color:var(--yellow)">🔄 In corso</div>${data.wip.map(n => focusCard(n,'wip')).join('')}</div>`;
+  }
+  if (data.due_today.length) {
+    html += `<div><div class="focus-group-label" style="color:var(--accent)">🔴 Scade oggi</div>${data.due_today.map(n => focusCard(n,'due-today')).join('')}</div>`;
+  }
+  document.getElementById('focus-body').innerHTML = html;
+  document.getElementById('focus-body').style.display = focusCollapsed ? 'none' : 'flex';
+}
+
+function focusCard(n, type) {
+  const assigneeHtml = n.assignee ? `<span class="assignee-badge">@${escHtml(n.assignee)}</span>` : '';
+  const projHtml = n.project ? `<span class="project-badge">${escHtml(n.project)}</span>` : '';
+  const statusHtml = n.status ? `<span class="status status-${n.status}" onclick="cycleStatus(${n.id},'${n.status||''}')" style="cursor:pointer">${STATUS_LABEL[n.status]}</span>` : '';
+  return `
+  <div class="focus-card ${type}" data-id="${n.id}">
+    <div style="flex:1;min-width:0">
+      <div class="focus-card-content">${escHtml(n.content)}</div>
+      ${(projHtml||assigneeHtml||statusHtml) ? `<div class="focus-card-meta">${projHtml}${assigneeHtml}${statusHtml}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+function toggleFocus() {
+  focusCollapsed = !focusCollapsed;
+  document.getElementById('focus-body').style.display = focusCollapsed ? 'none' : 'flex';
+  document.getElementById('focus-toggle').textContent = focusCollapsed ? '▼' : '▲';
+}
+
+// ── Keyboard shortcuts ────────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  const tag = document.activeElement.tagName;
+  const isEditing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || document.activeElement.contentEditable === 'true';
+
+  if (e.key === 'Escape') {
+    if (document.getElementById('shortcuts-modal').classList.contains('show')) {
+      closeShortcuts();
+    } else if (isEditing) {
+      document.activeElement.blur();
+    }
+    return;
+  }
+
+  if (isEditing) return;
+
+  if (e.key === 'n' || e.key === 'N') {
+    e.preventDefault();
+    switchTab('notes');
+    setTimeout(() => document.getElementById('note-input').focus(), 50);
+  }
+  if (e.key === '1') { e.preventDefault(); switchTab('notes'); }
+  if (e.key === '2') { e.preventDefault(); switchTab('board'); }
+  if (e.key === '3') { e.preventDefault(); switchTab('due'); }
+  if (e.key === '?') { e.preventDefault(); toggleShortcuts(); }
+});
+
+function toggleShortcuts() {
+  document.getElementById('shortcuts-modal').classList.toggle('show');
+}
+
+function closeShortcuts(e) {
+  if (!e || e.target === document.getElementById('shortcuts-modal')) {
+    document.getElementById('shortcuts-modal').classList.remove('show');
+  }
+}
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadNotes();

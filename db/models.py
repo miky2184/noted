@@ -15,6 +15,7 @@ class Note(SQLModel, table=True):
     priority: str = Field(default="medium")
     due_date: Optional[date] = None
     status: Optional[str] = None   # todo | wip | done | blocked
+    assignee: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 

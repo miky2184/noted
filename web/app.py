@@ -1,10 +1,11 @@
 from fastapi import FastAPI, Request, Query, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from datetime import date
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -14,6 +15,7 @@ from db import crud
 
 app = FastAPI(title="noted dashboard")
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 init_db()
 
@@ -27,6 +29,7 @@ def _note_dict(n):
         "priority": n.priority,
         "due_date": str(n.due_date) if n.due_date else None,
         "status": n.status,
+        "assignee": n.assignee,
         "created_at": n.created_at.isoformat(),
     }
 
@@ -53,10 +56,12 @@ async def api_notes(
     day: str = Query(None),
     tag: str = Query(None),
     project: str = Query(None),
+    assignee: str = Query(None),
+    status: str = Query(None),
 ):
     target = date.fromisoformat(day) if day else None
     with get_session() as session:
-        notes = crud.get_notes(session, day=target, tag=tag, project=project)
+        notes = crud.get_notes(session, day=target, tag=tag, project=project, assignee=assignee, status=status)
     return [_note_dict(n) for n in notes]
 
 
@@ -67,6 +72,7 @@ class NoteCreate(BaseModel):
     priority: Optional[str] = "medium"
     due_date: Optional[str] = None
     status: Optional[str] = None
+    assignee: Optional[str] = None
 
 
 @app.post("/api/notes", status_code=201)
@@ -76,7 +82,7 @@ async def api_add_note(body: NoteCreate):
         note = crud.add_note(
             session, content=body.content, tags=body.tags or "",
             project=body.project, priority=body.priority or "medium", due_date=due,
-            status=body.status or None,
+            status=body.status or None, assignee=body.assignee or None,
         )
     return _note_dict(note)
 
@@ -86,6 +92,7 @@ class NoteUpdate(BaseModel):
     priority: Optional[str] = None
     due_date: Optional[str] = None
     status: Optional[str] = None
+    assignee: Optional[str] = None
 
 
 @app.patch("/api/notes/{note_id}")
@@ -100,6 +107,7 @@ async def api_update_note(note_id: int, body: NoteUpdate):
             clear_due=body.due_date == "",
             status=body.status,
             clear_status=body.status == "",
+            assignee=body.assignee,
         )
     if not note:
         raise HTTPException(status_code=404, detail="Nota non trovata")
@@ -119,6 +127,33 @@ async def api_delete_note(note_id: int):
         ok = crud.delete_note(session, note_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Nota non trovata")
+
+
+@app.get("/api/board")
+async def api_board(
+    project: str = Query(None),
+    assignee: str = Query(None),
+):
+    with get_session() as session:
+        notes = crud.get_board_notes(session, project=project or None, assignee=assignee or None)
+    result = {"todo": [], "wip": [], "blocked": [], "done": []}
+    for n in notes:
+        key = n.status if n.status in result else None
+        if key:
+            result[key].append(_note_dict(n))
+    return result
+
+
+@app.get("/api/focus")
+async def api_focus():
+    today = date.today()
+    with get_session() as session:
+        board_notes = crud.get_board_notes(session)
+        due_notes = crud.get_due_notes(session)
+    wip = [_note_dict(n) for n in board_notes if n.status == "wip"]
+    blocked = [_note_dict(n) for n in board_notes if n.status == "blocked"]
+    due_today = [_note_dict(n) for n in due_notes if n.due_date == today]
+    return {"wip": wip, "blocked": blocked, "due_today": due_today}
 
 
 @app.post("/api/recap")
