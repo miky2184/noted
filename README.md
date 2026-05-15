@@ -4,7 +4,7 @@
 
 # noted
 
-Appunti giornalieri con recap AI. Dashboard web locale, avvio automatico al boot, accessibile da browser come `noted.local`.
+Note di lavoro giornaliere con recap AI, board kanban, Gantt e gestione contesti. Dashboard web locale, avvio automatico al boot.
 
 ---
 
@@ -34,13 +34,11 @@ pip install -e .
 
 ### 3. Configura la API key
 
-Crea un file `.env` nella root del progetto:
-
 ```bash
 echo "ANTHROPIC_API_KEY=sk-ant-..." > .env
 ```
 
-> La API key viene letta automaticamente all'avvio. Senza di essa i comandi `recap` e la generazione del recap da web non funzionano, ma tutto il resto (note, lista, dashboard) sì.
+> Senza API key i recap AI non funzionano, ma tutto il resto (note, board, Gantt, scadenze) sì.
 
 ### 4. Installa come servizio (avvio automatico al boot)
 
@@ -48,23 +46,16 @@ echo "ANTHROPIC_API_KEY=sk-ant-..." > .env
 noted install
 ```
 
-Questo comando:
-- Registra noted come **LaunchAgent** (macOS), **servizio systemd** (Linux) o **Task Scheduler** (Windows)
-- Aggiunge `noted.local` a `/etc/hosts` (potrebbe chiedere la password sudo su Mac/Linux)
-- Da quel momento, noted si avvia automaticamente ad ogni login e risponde su **http://noted.local:7979**
-
-Per disinstallare:
+Registra noted come **LaunchAgent** (macOS), **servizio systemd** (Linux) o **Task Scheduler** (Windows), aggiunge `noted.local` a `/etc/hosts` e lo avvia automaticamente ad ogni login su **http://noted.local:7979**.
 
 ```bash
-noted uninstall
+noted uninstall         # rimuove il servizio (i dati restano intatti)
 ```
 
-> I tuoi dati (note, DB, configurazione) non vengono mai cancellati.
-
-### 5. Avvio manuale (senza installazione)
+### 5. Avvio manuale
 
 ```bash
-noted web           # http://127.0.0.1:7979
+noted web               # http://127.0.0.1:7979
 noted web --port 8080
 ```
 
@@ -72,15 +63,96 @@ noted web --port 8080
 
 ## Dove vengono salvati i dati
 
-I dati vengono salvati in cartelle sicure e specifiche per piattaforma, al riparo da cancellazioni accidentali:
-
-| Piattaforma | Cartella dati | Configurazione |
-|-------------|---------------|----------------|
+| Piattaforma | Dati | Configurazione |
+|-------------|------|----------------|
 | macOS       | `~/Library/Application Support/noted/` | `~/Library/Preferences/noted/` |
 | Linux       | `~/.local/share/noted/` | `~/.config/noted/` |
 | Windows     | `%APPDATA%\noted\` | `%APPDATA%\noted\` |
 
-Il database SQLite si chiama `notes.db`, la configurazione `config.json`, il log `noted.log`.
+Il database SQLite si chiama `notes.db`. Per usare una posizione personalizzata (es. cartella Dropbox o iCloud):
+
+```bash
+export DATABASE_URL="sqlite:////Users/me/iCloud Drive/noted/notes.db"
+```
+
+---
+
+## Dashboard web
+
+Apri **http://noted.local:7979** (o `http://127.0.0.1:7979`).
+
+### Contesti
+
+Ogni contesto è un database logico separato — note, recap e Gantt non si mescolano mai tra contesti diversi. Il selettore `📁 CONTEXT ▾` in alto a sinistra permette di:
+
+- **Switchare** tra contesti con un click (es. `WORK`, `HOME`, `GYM`)
+- **Creare** un nuovo contesto dal campo in fondo al menu
+- **Rinominare** con l'icona ✎ (il rename si propaga su tutti i dati associati)
+- **Impostare un preferito** con la ★ — l'app lo carica automaticamente all'apertura
+- **Eliminare** con ✕ (richiede conferma, cancella tutti i dati del contesto)
+
+### Tab Oggi
+
+- Aggiunta rapida con `Enter` (a capo con `Shift+Enter`)
+- Campi: `#tag`, progetto, `@persona`, scadenza, stato, priorità
+- **Tag**: separati da `,` `|` `;` — normalizzati automaticamente in camelCase (`flusso acquiring` → `flussoAcquiring`)
+- **Progetti**: sempre in UPPERCASE
+- Modifica inline di contenuto, tag, progetto, assegnatario e scadenza direttamente sulla nota
+- Navigazione tra giorni con le frecce `‹ ›`
+
+### Tab Board
+
+Kanban a 7 colonne: **Inbox** · **Backlog** · **Todo** · **WIP** · **Waiting** · **Blocked** · **Done**
+
+- **Inbox** raccoglie le note senza stato degli ultimi 7 giorni (non si perdono tra i giorni)
+- Click sullo stato per avanzarlo nel ciclo
+- Filtri per progetto e assegnatario
+
+### Tab Scadenze
+
+Note con `due_date` impostata raggruppate in: ⚠️ Scadute · 🔴 Oggi · 🟡 Prossimi 7 giorni · 📆 Dopo
+
+### Tab Gantt
+
+Timeline visiva per pianificare progetti:
+
+- **Progetti** con colore personalizzabile (10 palette predefinite)
+- **Milestone** con date di inizio/fine — barre colorate sulla timeline
+- **Note con scadenza** appaiono come ◆ rossi sulla riga del progetto corrispondente; il tooltip mostra contenuto, data e assegnatario; click → vai alla nota
+- Zoom automatico: giornaliero / settimanale / mensile in base all'arco temporale
+- Linea verticale "oggi" sempre visibile
+
+### Recap AI
+
+- **🤖 Daily** — recap strutturato delle note di oggi, tiene conto delle milestone Gantt attive per contestualizzare rischi e ritardi
+- **📅 Weekly** — resume delle note degli ultimi 7 giorni con le milestone in corso
+- Salvataggio automatico al termine della generazione
+- Lista "Ultimi recap" nella sidebar: click su un recap per visualizzarlo, orario visibile per distinguere più recap dello stesso giorno
+- Selezione modello AI: ⚡ Haiku 4.5 · ✦ Sonnet 4.6 · ◆ Opus 4.7
+
+### Backup
+
+Il bottone `⬇` in alto a destra offre due formati:
+
+| Formato | Uso |
+|---------|-----|
+| `SQLite (.db)` | Backup completo ripristinabile — copia il file e sostituiscilo in caso di necessità |
+| `JSON (.json)` | Export leggibile di tutti i dati (note, recap, Gantt, contesti) — utile per migrazioni o analisi esterne |
+
+I file vengono nominati `noted_backup_YYYY-MM-DD.db / .json`.
+
+### Scorciatoie da tastiera
+
+| Tasto | Azione |
+|-------|--------|
+| `N` | Nuova nota (focus su input) |
+| `1` | Tab Oggi |
+| `2` | Tab Board |
+| `3` | Tab Scadenze |
+| `?` | Mostra scorciatoie |
+| `Esc` | Chiudi / annulla modifica |
+| `Enter` | Salva nota / conferma modifica |
+| `Shift+Enter` | A capo nell'editor |
 
 ---
 
@@ -91,30 +163,33 @@ Il database SQLite si chiama `notes.db`, la configurazione `config.json`, il log
 ```bash
 noted add "standup: allineamento finops con Global ACN"
 noted add "problema DAG scheduler" --tag airflow --project deutsche-bank
-noted add "deploy entro venerdì" --due 2025-01-17 --priority high --status todo
+noted add "deploy entro venerdì" --due 2026-01-17 --priority high --status todo
+noted add "review PR" --assignee marco
 ```
 
 | Opzione | Descrizione |
 |---------|-------------|
-| `--tag` / `-t` | Tag (comma-separated): `airflow,bigquery` |
-| `--project` / `-p` | Progetto: `finops`, `deutsche-bank` |
+| `--tag` / `-t` | Tag separati da virgola: `airflow,bigquery` |
+| `--project` / `-p` | Progetto (salvato in UPPERCASE) |
 | `--priority` / `-P` | `low` \| `medium` (default) \| `high` |
 | `--due` / `-d` | Scadenza: `YYYY-MM-DD` |
-| `--status` / `-s` | `todo` \| `wip` \| `done` \| `blocked` |
+| `--status` / `-s` | `backlog` \| `todo` \| `wip` \| `waiting` \| `blocked` \| `done` |
+| `--assignee` / `-a` | Assegnatario |
 
 ```bash
-noted list                          # ultime 20 note
-noted list --today                  # solo oggi
-noted list --tag airflow            # filtra per tag (case-insensitive)
+noted list                          # ultime 20 note di oggi
+noted list --tag airflow            # filtra per tag
 noted list --project finops         # filtra per progetto
-noted list --date 2025-01-15        # data specifica
+noted list --date 2026-01-15        # data specifica
+noted list --status wip             # filtra per stato
+noted list --assignee marco         # filtra per assegnatario
 
-noted search "deploy"               # ricerca full-text (case-insensitive)
+noted search "deploy"               # ricerca full-text
 
 noted edit 42 "nuovo testo"
 noted edit 42 --status done
-noted edit 42 --due 2025-01-20
-noted edit 42 --clear-due           # rimuove la scadenza
+noted edit 42 --due 2026-01-20
+noted edit 42 --clear-due
 
 noted delete 42
 ```
@@ -122,18 +197,17 @@ noted delete 42
 ### Recap AI
 
 ```bash
-noted recap                         # recap di oggi (non salvato)
-noted recap --save                  # genera e salva nel DB
-noted recap --date 2025-01-15       # recap di un giorno specifico
-noted recap --weekly                # recap settimanale dai recap salvati
-noted delete-recap 7                # elimina un recap per ID
+noted recap                         # recap di oggi
+noted recap --date 2026-01-15       # recap di un giorno specifico
+noted recap --weekly                # recap settimanale
+noted delete-recap 7
 ```
 
 ### Modello AI
 
 ```bash
-noted model                         # mostra il modello attivo
-noted set-model haiku               # più veloce ed economico
+noted model                         # modello attivo
+noted set-model haiku               # veloce ed economico
 noted set-model sonnet              # bilanciato (default)
 noted set-model opus                # più potente
 ```
@@ -141,36 +215,14 @@ noted set-model opus                # più potente
 ### Servizio
 
 ```bash
-noted install                       # installa avvio automatico + noted.local
-noted install --port 8080           # usa una porta diversa
+noted install                       # avvio automatico + noted.local
+noted install --port 8080
 noted install --no-hosts            # non modifica /etc/hosts
-noted uninstall                     # rimuove il servizio
-noted uninstall --keep-hosts        # rimuove il servizio ma lascia /etc/hosts
-noted restart                       # riavvia il servizio (dopo modifiche al codice)
-noted upgrade                       # git pull + pip install + restart automatico
-noted upgrade --no-restart          # aggiorna il codice senza riavviare subito
+noted uninstall
+noted restart                       # riavvia dopo modifiche al codice
+noted upgrade                       # git pull + pip install + restart
+noted upgrade --no-restart
 ```
-
-### Recap automatico via cron (opzionale)
-
-```bash
-noted install-cron                  # recap ogni giorno lun-ven alle 17:30
-noted install-cron --time 18:00     # orario personalizzato
-```
-
----
-
-## Dashboard web
-
-Apri il browser su **http://noted.local:7979** (o `http://127.0.0.1:7979` se non hai configurato `/etc/hosts`).
-
-Dalla dashboard puoi:
-- Aggiungere, modificare ed eliminare note inline
-- Impostare priorità, stato e scadenza su ogni nota
-- Visualizzare le **Scadenze** aperte in una tab dedicata
-- Generare il recap AI e salvarlo con un click
-- Scegliere il modello AI (Haiku / Sonnet / Opus) dalla sidebar
-- Alternare tra tema chiaro e scuro
 
 ---
 
@@ -180,18 +232,18 @@ Dalla dashboard puoi:
 noted/
 ├── cli/
 │   ├── main.py          # Typer CLI
-│   └── installer.py     # logica install/uninstall (Mac/Linux/Windows)
+│   └── installer.py     # install/uninstall (Mac/Linux/Windows)
 ├── db/
-│   ├── models.py        # SQLModel — Note, Recap
-│   ├── engine.py        # connessione DB
-│   ├── crud.py          # operazioni CRUD
-│   ├── config.py        # configurazione (modello, porta)
+│   ├── models.py        # SQLModel — Note, Recap, GanttProject, Milestone, Context
+│   ├── engine.py        # connessione DB + migration automatica
+│   ├── crud.py          # operazioni CRUD (filtrate per context)
+│   ├── config.py        # configurazione (modello AI, porta)
 │   └── paths.py         # percorsi dati cross-platform (platformdirs)
 ├── ai/
-│   └── recap.py         # chiamate Anthropic API con streaming
+│   └── recap.py         # Anthropic API streaming + integrazione dati Gantt
 ├── web/
-│   ├── app.py           # FastAPI + route API
+│   ├── app.py           # FastAPI + tutti gli endpoint REST
 │   └── templates/
-│       └── index.html   # dashboard Jinja2
+│       └── index.html   # SPA Jinja2 — Oggi, Board, Scadenze, Gantt
 └── pyproject.toml
 ```

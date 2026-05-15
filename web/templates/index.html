@@ -38,7 +38,7 @@
     --border-hover: #b0b8d4;
     --text: #1a1d2e;
     --text-muted: #6b7280;
-    --text-dim: #b0b8d4;
+    --text-dim: #9aa3b8;
     --accent: #6366f1;
     --accent-dim: #e0e7ff;
     --blue: #2563eb;
@@ -94,7 +94,7 @@
     grid-template-columns: 1fr 360px;
     height: calc(100vh - 52px);
   }
-  .main { padding: 20px 24px; overflow-y: auto; }
+  .main { padding: 20px 24px; overflow-y: auto; position: relative; }
   .sidebar { background: var(--surface); border-left: 1px solid var(--border); overflow-y: auto; display: flex; flex-direction: column; }
 
   /* ── Quick add ───────────────────────────────────────── */
@@ -163,7 +163,7 @@
   .tag:hover { opacity: 0.8; }
   .project-badge {
     font-size: 0.68rem; background: var(--blue-dim); color: var(--blue);
-    padding: 1px 6px; border-radius: 8px; cursor: pointer;
+    padding: 1px 6px; border-radius: 8px; cursor: pointer; text-transform: uppercase;
   }
   .project-badge:hover { opacity: 0.8; }
   .note-id { font-size: 0.68rem; color: var(--text-dim); margin-left: auto; margin-right: 4px; }
@@ -173,7 +173,7 @@
   }
   .delete-btn:hover { color: var(--red); background: rgba(248,113,113,0.1); }
   .note-content {
-    font-size: 0.88rem; color: #cbd5e1; line-height: 1.55;
+    font-size: 0.88rem; color: var(--text); line-height: 1.55;
     cursor: text; border-radius: 4px; padding: 2px 4px; margin: -2px -4px;
     transition: background 0.15s;
   }
@@ -241,7 +241,7 @@
     padding: 14px;
     font-size: 0.82rem;
     line-height: 1.65;
-    color: #cbd5e1;
+    color: var(--text-muted);
   }
   .recap-box h1, .recap-box h2, .recap-box h3 { color: var(--text); font-size: 0.85rem; margin-top: 10px; margin-bottom: 4px; }
   .recap-box h1:first-child, .recap-box h2:first-child, .recap-box h3:first-child { margin-top: 0; }
@@ -264,6 +264,8 @@
   .recap-day-body:hover { opacity: 0.75; }
   .recap-day-date { color: #94a3b8; margin-bottom: 3px; font-size: 0.78rem; font-weight: 500; }
   .recap-day-preview { color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 0.75rem; }
+  .recap-day-active { background: var(--accent-dim); border-radius: 6px; }
+  .recap-day-active .recap-day-date { color: var(--accent); }
   .recap-delete-btn {
     flex-shrink: 0; background: none; border: none; cursor: pointer; color: var(--text-dim);
     font-size: 12px; padding: 2px 4px; border-radius: 4px; transition: all 0.15s; opacity: 0;
@@ -346,7 +348,7 @@
   .board-filter-input { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-family: inherit; font-size: 0.8rem; padding: 5px 10px; outline: none; width: 160px; transition: border-color 0.15s; }
   .board-filter-input:focus { border-color: var(--accent); }
   .board-filter-input::placeholder { color: var(--text-dim); }
-  .board-container { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; align-items: start; }
+  .board-container { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; align-items: start; }
   .board-col { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); display: flex; flex-direction: column; max-height: calc(100vh - 200px); }
   .board-col-header { padding: 10px 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
   .board-col-title { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
@@ -365,19 +367,14 @@
   /* ── Assignee ────────────────────────────────────────── */
   .assignee-badge { font-size: 0.65rem; background: var(--surface); border: 1px solid var(--border); color: var(--text-muted); padding: 1px 6px; border-radius: 8px; white-space: nowrap; }
 
-  /* ── Focus section ───────────────────────────────────── */
-  .focus-section { margin-bottom: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
-  .focus-header { display: flex; align-items: center; gap: 8px; padding: 9px 14px; border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; }
-  .focus-header:hover { background: var(--surface2); }
-  .focus-toggle { font-size: 0.65rem; color: var(--text-dim); margin-left: auto; }
-  .focus-body { padding: 10px 14px; display: flex; flex-direction: column; gap: 10px; }
-  .focus-group-label { font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 5px; }
-  .focus-card { display: flex; align-items: flex-start; gap: 8px; padding: 7px 9px; background: var(--surface2); border-radius: 7px; border-left: 3px solid; margin-bottom: 4px; }
-  .focus-card.wip { border-left-color: var(--yellow); }
-  .focus-card.blocked { border-left-color: var(--red); }
-  .focus-card.due-today { border-left-color: var(--accent); }
-  .focus-card-content { font-size: 0.82rem; color: var(--text); line-height: 1.4; flex: 1; min-width: 0; }
-  .focus-card-meta { display: flex; gap: 4px; margin-top: 3px; flex-wrap: wrap; align-items: center; }
+  /* ── Inline edit placeholders ────────────────────────── */
+  .tag-empty { opacity: 0.35; border: 1px dashed var(--border) !important; background: none !important; }
+  .tag-empty:hover { opacity: 0.7; }
+  .project-empty { opacity: 0.35; border: 1px dashed var(--border) !important; background: none !important; color: var(--text-muted) !important; }
+  .project-empty:hover { opacity: 0.7; }
+  .assignee-empty { opacity: 0.35; border: 1px dashed var(--border) !important; background: none !important; }
+  .assignee-empty:hover { opacity: 0.7; }
+  .tags-group { display: inline-flex; gap: 3px; flex-wrap: wrap; cursor: pointer; }
 
   /* ── Shortcuts modal ─────────────────────────────────── */
   .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 300; display: none; align-items: center; justify-content: center; }
@@ -389,6 +386,143 @@
   .kbd { background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; font-family: monospace; font-size: 0.75rem; color: var(--text-muted); }
   .shortcuts-btn { background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); width: 28px; height: 28px; border-radius: 6px; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; transition: all 0.15s; font-family: monospace; font-weight: 700; }
   .shortcuts-btn:hover { border-color: var(--border-hover); color: var(--text); }
+
+  /* ── Backup menu ─────────────────────────────────────── */
+  .backup-menu-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px; border-radius: 6px; font-size: 0.8rem;
+    font-weight: 500; color: var(--text-muted); text-decoration: none;
+    transition: background 0.12s;
+  }
+  .backup-menu-item:hover { background: var(--surface2); color: var(--text); }
+
+  /* ── Context switcher ───────────────────────────────── */
+  .ctx-btn {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--surface2); border: 1px solid var(--border);
+    color: var(--text); border-radius: 8px; padding: 5px 12px;
+    font-family: inherit; font-size: 0.8rem; font-weight: 600;
+    cursor: pointer; transition: all 0.15s; white-space: nowrap;
+  }
+  .ctx-btn:hover { border-color: var(--border-hover); }
+  .ctx-menu {
+    display: none; position: absolute; top: calc(100% + 6px); right: 0;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 6px; min-width: 180px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.3); z-index: 200;
+  }
+  .ctx-menu.open { display: block; }
+  .ctx-menu-item {
+    display: flex; align-items: center; gap: 5px;
+    padding: 5px 8px; border-radius: 6px; font-size: 0.8rem;
+    font-weight: 600; color: var(--text-muted); transition: background 0.12s;
+  }
+  .ctx-menu-item:hover { background: var(--surface2); color: var(--text); }
+  .ctx-menu-item.active { background: var(--accent-dim); color: var(--accent); }
+  .ctx-item-name { flex: 1; cursor: pointer; }
+  .ctx-item-actions { display: flex; gap: 2px; opacity: 0; transition: opacity 0.15s; }
+  .ctx-menu-item:hover .ctx-item-actions { opacity: 1; }
+  .ctx-star-btn {
+    background: none; border: none; cursor: pointer; color: var(--text-dim);
+    font-size: 13px; padding: 1px 3px; border-radius: 3px; transition: all 0.15s; line-height: 1;
+    flex-shrink: 0;
+  }
+  .ctx-star-btn:hover { color: var(--yellow); }
+  .ctx-star-btn.favorite { color: var(--yellow); }
+  .ctx-rename-btn {
+    background: none; border: none; cursor: pointer; color: var(--text-dim);
+    font-size: 12px; padding: 1px 4px; border-radius: 3px; transition: all 0.15s;
+  }
+  .ctx-rename-btn:hover { color: var(--accent); }
+  .ctx-delete-btn {
+    background: none; border: none; cursor: pointer; color: var(--text-dim);
+    font-size: 11px; padding: 1px 4px; border-radius: 3px; transition: all 0.15s;
+  }
+  .ctx-delete-btn:hover { color: var(--red); }
+  .ctx-rename-input {
+    flex: 1; background: var(--surface2); border: 1px solid var(--accent);
+    border-radius: 4px; color: var(--text); font-family: inherit;
+    font-size: 0.78rem; font-weight: 600; padding: 2px 6px; outline: none;
+  }
+  .ctx-menu-divider { border-top: 1px solid var(--border); margin: 5px 0; }
+  .ctx-new-form { display: flex; gap: 5px; padding: 3px 2px; }
+  .ctx-new-input {
+    flex: 1; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text); font-family: inherit;
+    font-size: 0.78rem; padding: 4px 8px; outline: none;
+  }
+  .ctx-new-input:focus { border-color: var(--accent); }
+  .ctx-new-btn {
+    background: var(--accent); color: #0d0f1a; border: none;
+    border-radius: 6px; padding: 4px 10px; font-size: 0.82rem;
+    font-weight: 700; cursor: pointer; transition: opacity 0.15s;
+  }
+  .ctx-new-btn:hover { opacity: 0.85; }
+
+  /* ── Gantt ───────────────────────────────────────────── */
+  #view-gantt { display: none; }
+  .gantt-layout { display: flex; height: 100%; gap: 0; }
+  .gantt-panel { width: 310px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); overflow-y: auto; display: flex; flex-direction: column; padding: 16px; gap: 0; }
+  .gantt-panel-title { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 12px; }
+  .gantt-project-item { margin-bottom: 4px; border-radius: 8px; overflow: hidden; }
+  .gantt-project-header { display: flex; align-items: center; gap: 8px; padding: 7px 8px; cursor: pointer; border-radius: 8px; transition: background 0.15s; }
+  .gantt-project-header:hover { background: var(--surface2); }
+  .gantt-project-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .gantt-project-name { font-size: 0.84rem; font-weight: 600; flex: 1; color: var(--text); }
+  .gantt-project-del { opacity: 0; background: none; border: none; cursor: pointer; color: var(--text-dim); font-size: 12px; padding: 1px 4px; border-radius: 4px; transition: all 0.15s; }
+  .gantt-project-header:hover .gantt-project-del { opacity: 1; }
+  .gantt-project-del:hover { color: var(--red); background: rgba(248,113,113,0.1); }
+  .gantt-milestones-list { padding: 2px 8px 6px 26px; display: flex; flex-direction: column; gap: 3px; }
+  .gantt-ms-item { display: flex; align-items: flex-start; gap: 6px; font-size: 0.76rem; color: var(--text-muted); padding: 3px 0; }
+  .gantt-ms-item:hover .gantt-ms-del { opacity: 1; }
+  .gantt-ms-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .gantt-ms-dates { font-size: 0.68rem; color: var(--text-dim); }
+  .gantt-ms-del { opacity: 0; background: none; border: none; cursor: pointer; color: var(--text-dim); font-size: 11px; padding: 1px 3px; border-radius: 3px; margin-left: auto; transition: all 0.15s; }
+  .gantt-ms-del:hover { color: var(--red); }
+  .gantt-add-ms-form { padding: 4px 0 8px 26px; display: none; flex-direction: column; gap: 4px; }
+  .gantt-add-ms-form.open { display: flex; }
+  .gantt-add-ms-btn { font-size: 0.72rem; color: var(--accent); background: none; border: none; cursor: pointer; padding: 2px 0 2px 26px; text-align: left; opacity: 0.7; }
+  .gantt-add-ms-btn:hover { opacity: 1; }
+  .gantt-divider { flex: 1; }
+  .gantt-add-proj-form { padding-top: 14px; border-top: 1px solid var(--border); margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+  .gantt-input { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-family: inherit; font-size: 0.8rem; padding: 5px 9px; outline: none; width: 100%; transition: border-color 0.15s; }
+  .gantt-input:focus { border-color: var(--accent); }
+  .gantt-input::placeholder { color: var(--text-dim); }
+  .gantt-colors { display: flex; gap: 5px; flex-wrap: wrap; }
+  .gantt-color-swatch { width: 18px; height: 18px; border-radius: 50%; cursor: pointer; border: 2px solid transparent; transition: border-color 0.15s, transform 0.1s; }
+  .gantt-color-swatch:hover { transform: scale(1.15); }
+  .gantt-color-swatch.selected { border-color: var(--text); }
+  .gantt-btn { background: var(--accent); color: #0d0f1a; border: none; border-radius: 6px; padding: 5px 14px; font-size: 0.78rem; font-weight: 700; cursor: pointer; transition: opacity 0.15s; width: 100%; }
+  .gantt-btn:hover { opacity: 0.85; }
+  .gantt-btn-sm { background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); border-radius: 5px; padding: 3px 8px; font-size: 0.72rem; cursor: pointer; transition: all 0.15s; }
+  .gantt-btn-sm:hover { border-color: var(--accent); color: var(--accent); }
+  /* Chart */
+  .gantt-chart-area { flex: 1; overflow: auto; padding: 20px 24px; }
+  .gantt-empty { color: var(--text-muted); font-size: 0.85rem; padding: 40px; text-align: center; line-height: 2; }
+  .gantt-container { min-width: 500px; }
+  .gantt-header-row { display: flex; margin-bottom: 6px; position: sticky; top: 0; background: var(--bg); z-index: 10; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+  .gantt-label-col { width: 180px; flex-shrink: 0; }
+  .gantt-scale { flex: 1; position: relative; }
+  .gantt-scale-mark { position: absolute; font-size: 0.62rem; color: var(--text-dim); border-left: 1px solid var(--border); padding-left: 3px; overflow: hidden; white-space: nowrap; }
+  .gantt-body { }
+  .gantt-row { display: flex; align-items: center; margin-bottom: 5px; min-height: 30px; }
+  .gantt-row-label { width: 180px; flex-shrink: 0; font-size: 0.8rem; color: var(--text-muted); padding-right: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gantt-row-label.project { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-top: 10px; }
+  .gantt-row.project-divider .gantt-row-track { border-top: 1px solid var(--border); height: 1px; }
+  .gantt-row-track { flex: 1; position: relative; height: 28px; }
+  .gantt-track-bg { position: absolute; inset: 0; background: var(--surface2); border-radius: 4px; opacity: 0.5; }
+  .gantt-bar { position: absolute; height: 22px; top: 3px; border-radius: 5px; display: flex; align-items: center; padding: 0 8px; font-size: 0.68rem; font-weight: 600; color: #fff; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: default; min-width: 6px; transition: filter 0.15s; }
+  .gantt-bar:hover { filter: brightness(1.15); }
+  .gantt-today-line { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: var(--accent); opacity: 0.6; border-radius: 1px; pointer-events: none; z-index: 5; }
+  /* Diamond: rotated square */
+  .gantt-diamond { position: absolute; width: 10px; height: 10px; top: 9px; margin-left: -5px; transform: rotate(45deg); cursor: pointer; z-index: 10; transition: transform 0.15s; }
+  .gantt-diamond:hover { transform: rotate(45deg) scale(1.4); }
+  .gantt-diamond.overdue { background: var(--red); }
+  .gantt-diamond.today   { background: var(--yellow); }
+  .gantt-diamond.future  { background: var(--accent); }
+  .gantt-diamond.done    { background: var(--green); }
+  .gantt-notes-row .gantt-row-label { font-size: 0.65rem; color: var(--text-dim); font-style: italic; }
+  .gantt-notes-row .gantt-row-track { height: 24px; }
 </style>
 </head>
 <body>
@@ -403,6 +537,7 @@
     <button class="tab-btn active" id="tab-notes" onclick="switchTab('notes')">📝 Oggi</button>
     <button class="tab-btn" id="tab-board" onclick="switchTab('board')">🗂 Board</button>
     <button class="tab-btn" id="tab-due" onclick="switchTab('due')">📅 Scadenze</button>
+    <button class="tab-btn" id="tab-gantt" onclick="switchTab('gantt')">📊 Gantt</button>
   </div>
 
   <div class="date-nav" id="date-nav">
@@ -412,7 +547,50 @@
     <button class="today-btn" id="today-btn">oggi</button>
   </div>
 
-  <div class="refresh-dot" id="refresh-dot" title="Auto-refresh attivo" style="margin-left:auto"></div>
+  <!-- Context switcher -->
+  <div class="ctx-switcher" id="ctx-switcher" style="margin-left:auto;position:relative;">
+    <button class="ctx-btn" id="ctx-btn" onclick="toggleCtxMenu()">
+      <span id="ctx-icon">📁</span>
+      <span id="ctx-label">{{ active_ctx | upper }}</span>
+      <span style="font-size:0.65rem;opacity:0.6">▾</span>
+    </button>
+    <div class="ctx-menu" id="ctx-menu">
+      {% for c in contexts %}
+      <div class="ctx-menu-item {% if c.name == active_ctx %}active{% endif %}" id="ctx-item-{{ c.id }}">
+        <button class="ctx-star-btn" id="ctx-star-{{ c.id }}"
+                onclick="toggleFavorite(event,'{{ c.name }}')" title="Imposta come preferito">☆</button>
+        <span class="ctx-item-name" onclick="switchContext('{{ c.name }}')" title="Apri contesto">{{ c.name | upper }}</span>
+        <div class="ctx-item-actions">
+          <button class="ctx-rename-btn" onclick="startRename(event,{{ c.id }},'{{ c.name }}')" title="Rinomina">✎</button>
+          {% if c.name != 'default' %}
+          <button class="ctx-delete-btn" onclick="deleteContext(event,{{ c.id }},'{{ c.name }}')" title="Elimina">✕</button>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+      <div class="ctx-menu-divider"></div>
+      <div class="ctx-new-form">
+        <input class="ctx-new-input" id="ctx-new-input" placeholder="nuovo contesto..." maxlength="30"
+               onkeydown="if(event.key==='Enter') createContext()">
+        <button class="ctx-new-btn" onclick="createContext()">+</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Backup -->
+  <div style="position:relative;" id="backup-wrapper">
+    <button class="theme-btn" id="backup-btn" onclick="toggleBackupMenu()" title="Backup database">⬇</button>
+    <div id="backup-menu" style="display:none;position:absolute;top:calc(100% + 6px);right:0;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:6px;min-width:170px;box-shadow:0 8px 30px rgba(0,0,0,0.3);z-index:200;">
+      <a href="/api/backup/db" download class="backup-menu-item">
+        <span>🗄</span><span>SQLite <span style="opacity:0.5;font-size:0.72rem">(.db)</span></span>
+      </a>
+      <a href="/api/backup/json" download class="backup-menu-item">
+        <span>📄</span><span>JSON <span style="opacity:0.5;font-size:0.72rem">(.json)</span></span>
+      </a>
+    </div>
+  </div>
+
+  <div class="refresh-dot" id="refresh-dot" title="Auto-refresh attivo"></div>
   <button class="shortcuts-btn" id="shortcuts-btn" onclick="toggleShortcuts()" title="Scorciatoie da tastiera (?)">?</button>
   <button class="theme-btn" id="theme-toggle" title="Cambia tema">🌙</button>
 </div>
@@ -444,16 +622,6 @@
         <button type="submit" class="add-btn" id="add-btn">+ Aggiungi</button>
       </div>
     </form>
-
-    <!-- Focus section (shown on today's tab when there are WIP/Blocked/Due-today items) -->
-    <div class="focus-section" id="focus-section" style="display:none">
-      <div class="focus-header" onclick="toggleFocus()">
-        <span class="section-title">Focus</span>
-        <span id="focus-counts" style="font-size:0.75rem;color:var(--text-muted)"></span>
-        <span class="focus-toggle" id="focus-toggle">▲</span>
-      </div>
-      <div class="focus-body" id="focus-body"></div>
-    </div>
 
     <!-- Filters -->
     <div id="filter-bar" class="filter-bar" style="display:none"></div>
@@ -487,6 +655,28 @@
       </div>
       <div id="due-list"></div>
     </div>
+
+    <!-- Gantt view -->
+    <div id="view-gantt" style="display:none;position:absolute;inset:0;overflow:hidden;">
+      <div class="gantt-layout" style="height:100%;">
+        <!-- Left panel -->
+        <div class="gantt-panel">
+          <div class="gantt-panel-title">Progetti</div>
+          <div id="gantt-projects-list"></div>
+          <div class="gantt-divider"></div>
+          <div class="gantt-add-proj-form">
+            <div class="gantt-panel-title">Nuovo progetto</div>
+            <input class="gantt-input" id="gantt-proj-name" placeholder="Nome progetto" maxlength="60">
+            <div class="gantt-colors" id="gantt-color-picker"></div>
+            <button class="gantt-btn" onclick="addGanttProject()">+ Aggiungi</button>
+          </div>
+        </div>
+        <!-- Chart area -->
+        <div class="gantt-chart-area">
+          <div id="gantt-chart"></div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="sidebar">
@@ -503,15 +693,15 @@
 
     <div class="sidebar-section">
       <div class="section-header">
-        <span class="section-title">Recap di oggi</span>
-        <button id="gen-recap-btn" onclick="generateRecap(false)" title="Genera recap" style="margin-left:auto;background:var(--accent-dim);border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:3px 10px;font-size:0.72rem;font-weight:600;cursor:pointer;transition:opacity 0.15s;">🤖 Genera</button>
-        <button id="gen-save-btn" onclick="generateRecap(true)" title="Genera e salva" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:6px;padding:3px 10px;font-size:0.72rem;cursor:pointer;transition:all 0.15s;">💾 Salva</button>
+        <span class="section-title">Recap AI</span>
+        <button id="gen-daily-btn" onclick="generateRecap()" title="Genera recap di oggi (salva automaticamente)" style="margin-left:auto;background:var(--accent-dim);border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:3px 10px;font-size:0.72rem;font-weight:600;cursor:pointer;transition:opacity 0.15s;">🤖 Daily</button>
+        <button id="gen-weekly-btn" onclick="generateWeeklyRecap()" title="Genera recap settimanale dagli ultimi 7 giorni di note" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:6px;padding:3px 10px;font-size:0.72rem;cursor:pointer;transition:all 0.15s;">📅 Weekly</button>
       </div>
       <div id="recap-content">
         {% if recap %}
           <div class="recap-box" id="recap-box"></div>
         {% else %}
-          <div class="no-recap">Nessun recap salvato.<br>Generalo con: <code>noted recap --save</code></div>
+          <div class="no-recap">Nessun recap salvato.<br>Clicca <strong>Daily</strong> per generarne uno.</div>
         {% endif %}
       </div>
     </div>
@@ -523,8 +713,8 @@
       {% if recent_recaps %}
         {% for r in recent_recaps %}
         <div class="recap-day" id="recap-row-{{ r.id }}">
-          <div class="recap-day-body" onclick="navigateToDate('{{ r.recap_date.isoformat() }}')">
-            <div class="recap-day-date">{{ r.recap_date.strftime('%d %b %Y') }} &mdash; {{ r.notes_count }} note</div>
+          <div class="recap-day-body" onclick="loadRecap({{ r.id }})">
+            <div class="recap-day-date">{{ r.recap_date.strftime('%d %b %Y') }} <span style="opacity:0.55">{{ r.created_at.strftime('%H:%M') }}</span> &mdash; {{ r.notes_count }} note</div>
             <div class="recap-day-preview">{{ r.summary[:90] }}...</div>
           </div>
           <button class="recap-delete-btn" onclick="deleteRecap({{ r.id }})" title="Elimina recap">✕</button>
@@ -538,6 +728,18 @@
 </div>
 
 <div id="toast"></div>
+
+<!-- Confirm modal -->
+<div class="modal-overlay" id="confirm-modal" onclick="closeConfirm(event)">
+  <div class="modal" style="max-width:340px;">
+    <div class="modal-title" id="confirm-title"></div>
+    <div id="confirm-body" style="font-size:0.82rem;color:var(--text-muted);line-height:1.6;margin-bottom:18px;"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button onclick="closeConfirm()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text-muted);border-radius:6px;padding:6px 16px;font-family:inherit;font-size:0.82rem;cursor:pointer;">Annulla</button>
+      <button id="confirm-ok" style="background:var(--red);border:none;color:#fff;border-radius:6px;padding:6px 16px;font-family:inherit;font-size:0.82rem;font-weight:600;cursor:pointer;">Elimina</button>
+    </div>
+  </div>
+</div>
 
 <!-- Shortcuts modal -->
 <div class="modal-overlay" id="shortcuts-modal" onclick="closeShortcuts(event)">
@@ -559,6 +761,153 @@ let currentDate = '{{ today.isoformat() }}';
 let refreshTimer = null;
 let activeTab = 'notes';
 const REFRESH_INTERVAL = 30000;
+let activeCtx = localStorage.getItem('noted-ctx') || '{{ active_ctx }}';
+
+// ── API wrapper ───────────────────────────────────────────────────────────────
+function apiFetch(url, opts = {}) {
+  const sep = url.includes('?') ? '&' : '?';
+  return fetch(`${url}${sep}ctx=${encodeURIComponent(activeCtx)}`, opts);
+}
+
+// ── Context switcher ──────────────────────────────────────────────────────────
+function toggleBackupMenu() {
+  const menu = document.getElementById('backup-menu');
+  menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+}
+
+document.addEventListener('click', e => {
+  const wrapper = document.getElementById('backup-wrapper');
+  if (wrapper && !wrapper.contains(e.target)) {
+    document.getElementById('backup-menu').style.display = 'none';
+  }
+});
+
+function toggleCtxMenu() {
+  document.getElementById('ctx-menu').classList.toggle('open');
+}
+
+document.addEventListener('click', e => {
+  const switcher = document.getElementById('ctx-switcher');
+  if (switcher && !switcher.contains(e.target)) {
+    document.getElementById('ctx-menu').classList.remove('open');
+  }
+});
+
+function switchContext(name) {
+  activeCtx = name;
+  localStorage.setItem('noted-ctx', name);
+  document.getElementById('ctx-menu').classList.remove('open');
+  // reload page so server renders correct recap/contexts state
+  window.location.href = `/?ctx=${encodeURIComponent(name)}`;
+}
+
+async function createContext() {
+  const input = document.getElementById('ctx-new-input');
+  const name = input.value.trim().toLowerCase();
+  if (!name) return;
+  try {
+    const res = await fetch('/api/contexts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) throw new Error((await res.json()).detail || 'Errore');
+    input.value = '';
+    switchContext(name);
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function toggleFavorite(e, name) {
+  e.stopPropagation();
+  const current = localStorage.getItem('noted-favorite-ctx');
+  const newFav = current === name ? 'default' : name;
+  localStorage.setItem('noted-favorite-ctx', newFav);
+  _refreshStars();
+  toast(newFav === name ? `⭐ ${name.toUpperCase()} impostato come preferito` : 'Preferito rimosso');
+}
+
+function _refreshStars() {
+  const fav = localStorage.getItem('noted-favorite-ctx') || 'default';
+  document.querySelectorAll('.ctx-star-btn').forEach(btn => {
+    const id = btn.id.replace('ctx-star-', '');
+    const item = document.getElementById(`ctx-item-${id}`);
+    if (!item) return;
+    const name = item.querySelector('.ctx-item-name')?.textContent.trim().toLowerCase();
+    const isFav = name === fav;
+    btn.textContent = isFav ? '★' : '☆';
+    btn.classList.toggle('favorite', isFav);
+    btn.title = isFav ? 'Preferito attivo' : 'Imposta come preferito';
+  });
+}
+
+function startRename(e, ctxId, currentName) {
+  e.stopPropagation();
+  const item = document.getElementById(`ctx-item-${ctxId}`);
+  const nameSpan = item.querySelector('.ctx-item-name');
+  const actions = item.querySelector('.ctx-item-actions');
+
+  const input = document.createElement('input');
+  input.className = 'ctx-rename-input';
+  input.value = currentName;
+  nameSpan.replaceWith(input);
+  actions.style.opacity = '1';
+  input.focus();
+  input.select();
+
+  async function save() {
+    const newName = input.value.trim().toLowerCase();
+    if (!newName || newName === currentName) { window.location.reload(); return; }
+    try {
+      const res = await fetch(`/api/contexts/${ctxId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newName }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || 'Errore');
+      // update favorite/active if needed
+      if (localStorage.getItem('noted-favorite-ctx') === currentName)
+        localStorage.setItem('noted-favorite-ctx', newName);
+      const targetCtx = activeCtx === currentName ? newName : activeCtx;
+      window.location.href = `/?ctx=${encodeURIComponent(targetCtx)}`;
+    } catch(err) { toast(err.message, 'error'); window.location.reload(); }
+  }
+
+  input.onblur = save;
+  input.onkeydown = e => {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { window.location.reload(); }
+  };
+}
+
+async function deleteContext(e, ctxId, name) {
+  e.stopPropagation();
+  document.getElementById('ctx-menu').classList.remove('open');
+  const ok = await showConfirm(
+    `Elimina contesto`,
+    `Stai per eliminare <strong>${name.toUpperCase()}</strong>.<br>Tutte le note, recap e progetti Gantt associati andranno persi definitivamente.`
+  );
+  if (!ok) return;
+  try {
+    const res = await fetch(`/api/contexts/${ctxId}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error();
+    if (localStorage.getItem('noted-favorite-ctx') === name)
+      localStorage.removeItem('noted-favorite-ctx');
+    const target = activeCtx === name ? 'default' : activeCtx;
+    window.location.href = `/?ctx=${encodeURIComponent(target)}`;
+  } catch { toast('Errore eliminazione contesto', 'error'); }
+}
+
+// Init: apply stars and auto-redirect to favorite if no ctx in URL
+(function initCtx() {
+  _refreshStars();
+  const urlCtx = new URLSearchParams(window.location.search).get('ctx');
+  if (!urlCtx) {
+    const fav = localStorage.getItem('noted-favorite-ctx');
+    if (fav && fav !== activeCtx) {
+      window.location.href = `/?ctx=${encodeURIComponent(fav)}`;
+    }
+  }
+})();
 
 // ── Theme ─────────────────────────────────────────────────────────────────────
 (function() {
@@ -580,16 +929,24 @@ document.getElementById('theme-toggle').addEventListener('click', () => {
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 function switchTab(tab) {
   activeTab = tab;
-  ['notes', 'board', 'due'].forEach(t => {
+  ['notes', 'board', 'due', 'gantt'].forEach(t => {
     document.getElementById(`tab-${t}`).classList.toggle('active', t === tab);
   });
   document.getElementById('view-notes').style.display = tab === 'notes' ? 'block' : 'none';
   document.getElementById('view-board').style.display = tab === 'board' ? 'block' : 'none';
   document.getElementById('view-due').style.display = tab === 'due' ? 'block' : 'none';
+  document.getElementById('view-gantt').style.display = tab === 'gantt' ? 'block' : 'none';
   document.getElementById('date-nav').style.display = tab === 'notes' ? '' : 'none';
-  document.getElementById('add-form').style.display = tab === 'notes' && isToday(currentDate) ? '' : 'none';
-  document.getElementById('focus-section').style.display = (tab === 'notes' && isToday(currentDate)) ? '' : 'none';
+  document.getElementById('add-form').style.display = (tab === 'notes' && isToday(currentDate)) ? '' : 'none';
   document.getElementById('filter-bar').style.display = 'none';
+  if (tab === 'gantt') {
+    document.querySelector('.sidebar').style.display = 'none';
+    document.querySelector('.layout').style.gridTemplateColumns = '1fr';
+    loadGantt();
+  } else {
+    document.querySelector('.sidebar').style.display = '';
+    document.querySelector('.layout').style.gridTemplateColumns = '1fr 360px';
+  }
   if (tab === 'due') loadDueNotes();
   if (tab === 'board') loadBoard();
 }
@@ -616,7 +973,7 @@ const STATUS_LABEL = { backlog: '🗂 backlog', todo: '⬜ todo', wip: '🔄 wip
 
 async function loadDueNotes() {
   try {
-    const res = await fetch('/api/notes/due');
+    const res = await apiFetch('/api/notes/due');
     const notes = await res.json();
     renderDueNotes(notes);
   } catch(e) { console.error(e); }
@@ -652,16 +1009,24 @@ function renderDueNotes(notes) {
       const dateCls = key === 'overdue' ? 'overdue' : key === 'today' ? 'today' : 'future';
       const statusHtml = n.status ? `<span class="status status-${n.status}" onclick="cycleStatus(${n.id},'${n.status||''}')" title="Cambia stato">${STATUS_LABEL[n.status]}</span>` : `<span class="status status-empty" onclick="cycleStatus(${n.id},'')" title="Aggiungi stato">+ stato</span>`;
       const priorityHtml = `<span class="priority priority-${n.priority}" onclick="cyclePriority(${n.id},'${n.priority}')" title="Cambia priorità">${n.priority}</span>`;
-      const projHtml = n.project ? `<span class="project-badge">${escHtml(n.project)}</span>` : '';
-      const assigneeHtml = n.assignee ? `<span class="assignee-badge">@${escHtml(n.assignee)}</span>` : '';
+      const projHtml = n.project
+        ? `<span class="project-badge" onclick="editProject(this,${n.id},'${escHtml(n.project)}')" title="Modifica progetto">${escHtml(n.project)}</span>`
+        : `<span class="project-badge project-empty" onclick="editProject(this,${n.id},'')" title="Aggiungi progetto">+progetto</span>`;
+      const assigneeHtml = n.assignee
+        ? `<span class="assignee-badge" onclick="editAssignee(this,${n.id},'${escHtml(n.assignee)}')" title="Modifica assegnatario">@${escHtml(n.assignee)}</span>`
+        : `<span class="assignee-badge assignee-empty" onclick="editAssignee(this,${n.id},'')" title="Assegna a qualcuno">+@</span>`;
+      const tagsGroup = `<span class="tags-group" onclick="editTags(this,${n.id},'${escHtml(n.tags.join(','))}')" title="Modifica tag">${
+        n.tags.length
+          ? n.tags.map(t => `<span class="tag">#${escHtml(t)}</span>`).join('')
+          : `<span class="tag tag-empty">+tag</span>`
+      }</span>`;
       return `
       <div class="due-item ${dateCls}" data-id="${n.id}">
         <div class="due-item-date ${dateCls}">📅 ${n.due_date}</div>
         <div class="due-item-body">
           <div class="due-item-content" onclick="startEdit(this,${n.id})" title="Clicca per modificare">${escHtml(n.content)}</div>
           <div class="due-item-meta">
-            ${statusHtml}${priorityHtml}${projHtml}${assigneeHtml}
-            ${n.tags.map(t=>`<span class="tag">#${escHtml(t)}</span>`).join('')}
+            ${statusHtml}${priorityHtml}${projHtml}${assigneeHtml}${tagsGroup}
           </div>
         </div>
         <button class="delete-btn" style="opacity:0.4" onclick="deleteNote(${n.id})" title="Elimina">✕</button>
@@ -687,7 +1052,6 @@ function navigateToDate(isoDate) {
   document.getElementById('notes-section-label').textContent =
     isToday(isoDate) ? 'Note di oggi' : `Note del ${formatDateLabel(isoDate)}`;
   document.getElementById('add-form').style.display = isToday(isoDate) ? '' : 'none';
-  document.getElementById('focus-section').style.display = (activeTab === 'notes' && isToday(isoDate)) ? '' : 'none';
   loadNotes();
   resetRefresh();
 }
@@ -721,11 +1085,10 @@ async function loadNotes() {
   if (activeProject) params.set('project', activeProject);
 
   try {
-    const res = await fetch('/api/notes?' + params);
+    const res = await apiFetch('/api/notes?' + params);
     const notes = await res.json();
     renderNotes(notes);
     renderFilterBar();
-    if (isToday(currentDate)) loadFocus();
   } catch(e) {
     console.error(e);
   }
@@ -745,19 +1108,23 @@ function renderNotes(notes) {
 
   const today = '{{ today.isoformat() }}';
   list.innerHTML = notes.map(n => {
-    const dueHtml = n.due_date ? (() => {
-      const isOverdue = n.due_date < today;
-      const isSoon = !isOverdue && n.due_date <= new Date(Date.now() + 2*86400000).toISOString().slice(0,10);
-      const cls = isOverdue ? 'overdue' : isSoon ? 'soon' : '';
-      return `<span class="due-date ${cls}">📅 ${n.due_date}</span>`;
-    })() : '';
-    const assigneeHtml = n.assignee ? `<span class="assignee-badge">@${escHtml(n.assignee)}</span>` : '';
+    const tagsGroup = `<span class="tags-group" onclick="editTags(this,${n.id},'${escHtml(n.tags.join(','))}')" title="Modifica tag">${
+      n.tags.length
+        ? n.tags.map(t => `<span class="tag">#${escHtml(t)}</span>`).join('')
+        : `<span class="tag tag-empty">+tag</span>`
+    }</span>`;
+    const projHtml = n.project
+      ? `<span class="project-badge" onclick="editProject(this,${n.id},'${escHtml(n.project)}')" title="Modifica progetto">${escHtml(n.project)}</span>`
+      : `<span class="project-badge project-empty" onclick="editProject(this,${n.id},'')" title="Aggiungi progetto">+progetto</span>`;
+    const assigneeHtml = n.assignee
+      ? `<span class="assignee-badge" onclick="editAssignee(this,${n.id},'${escHtml(n.assignee)}')" title="Modifica assegnatario">@${escHtml(n.assignee)}</span>`
+      : `<span class="assignee-badge assignee-empty" onclick="editAssignee(this,${n.id},'')" title="Assegna a qualcuno">+@</span>`;
     return `
     <div class="note-item" data-id="${n.id}">
       <div class="note-meta">
         <span class="note-time">${n.created_at.slice(11, 16)}</span>
-        ${n.project ? `<span class="project-badge" onclick="filterBy('project','${escHtml(n.project)}')">${escHtml(n.project)}</span>` : ''}
-        ${n.tags.map(t => `<span class="tag" onclick="filterBy('tag','${escHtml(t)}')">#${escHtml(t)}</span>`).join('')}
+        ${projHtml}
+        ${tagsGroup}
         ${assigneeHtml}
         <span class="status ${n.status ? 'status-'+n.status : 'status-empty'}" onclick="cycleStatus(${n.id},'${n.status||''}')" title="Clicca per cambiare stato">${n.status ? STATUS_LABEL[n.status] : '+ stato'}</span>
         <span class="priority priority-${n.priority}" onclick="cyclePriority(${n.id},'${n.priority}')" title="Clicca per cambiare priorità">${n.priority}</span>
@@ -812,13 +1179,13 @@ document.getElementById('add-form').addEventListener('submit', async e => {
   btn.disabled = true;
 
   try {
-    const res = await fetch('/api/notes', {
+    const res = await apiFetch('/api/notes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         content,
-        tags: document.getElementById('note-tag').value.replace(/^#/, '').trim(),
-        project: document.getElementById('note-project').value.trim() || null,
+        tags: normalizeTags(document.getElementById('note-tag').value),
+        project: document.getElementById('note-project').value.trim() ? normalizeProject(document.getElementById('note-project').value) : null,
         assignee: document.getElementById('note-assignee').value.replace(/^@/, '').trim() || null,
         priority: document.getElementById('note-priority').value,
         due_date: document.getElementById('note-due').value || null,
@@ -959,6 +1326,21 @@ async function patchNote(noteId, data) {
   return res.json();
 }
 
+// ── Load recap by id ─────────────────────────────────────────────────────────
+async function loadRecap(id) {
+  try {
+    const res = await fetch(`/api/recaps/${id}`);
+    if (!res.ok) throw new Error();
+    const r = await res.json();
+    document.getElementById('recap-content').innerHTML =
+      `<div class="recap-box" id="recap-box">${marked.parse(r.summary)}</div>`;
+    // highlight active item
+    document.querySelectorAll('.recap-day').forEach(el => el.classList.remove('recap-day-active'));
+    const row = document.getElementById(`recap-row-${id}`);
+    if (row) row.classList.add('recap-day-active');
+  } catch { toast('Errore caricamento recap', 'error'); }
+}
+
 // ── Delete recap ─────────────────────────────────────────────────────────────
 async function deleteRecap(id) {
   const row = document.getElementById(`recap-row-${id}`);
@@ -987,48 +1369,93 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function normalizeProject(raw) {
+  return raw.trim().toUpperCase();
+}
+
+function normalizeTags(raw) {
+  return raw
+    .split(/[|;,]+/)
+    .map(t => t.trim().replace(/^#+/, ''))
+    .filter(t => t.length > 0)
+    .map(t => {
+      const parts = t.split(/[\s\-_]+/);
+      return parts[0].toLowerCase() +
+        parts.slice(1).map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join('');
+    })
+    .join(',');
+}
+
 // ── Generate recap ────────────────────────────────────────────────────────────
-async function generateRecap(save) {
-  const genBtn = document.getElementById('gen-recap-btn');
-  const saveBtn = document.getElementById('gen-save-btn');
+async function _streamToRecapBox(url, doneLabel) {
+  const dailyBtn = document.getElementById('gen-daily-btn');
+  const weeklyBtn = document.getElementById('gen-weekly-btn');
   const box = document.getElementById('recap-content');
 
-  genBtn.disabled = saveBtn.disabled = true;
-  genBtn.textContent = '⏳ Generando...';
+  dailyBtn.disabled = weeklyBtn.disabled = true;
   box.innerHTML = '<div class="recap-box" id="recap-box" style="color:var(--text-muted);font-size:0.82rem;min-height:60px;"></div>';
   const recapBox = document.getElementById('recap-box');
 
   try {
-    if (save) {
-      // attendi risposta completa + salva
-      const res = await fetch('/api/recap?save=true', { method: 'POST' });
-      if (!res.ok) throw new Error((await res.json()).detail || 'Errore');
-      const data = await res.json();
-      recapBox.innerHTML = marked.parse(data.summary);
-      toast('Recap generato e salvato 💾', 'success');
-    } else {
-      // streaming
-      const res = await fetch('/api/recap', { method: 'POST' });
-      if (!res.ok) throw new Error((await res.json()).detail || 'Errore');
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let full = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        full += decoder.decode(value, { stream: true });
-        recapBox.innerHTML = marked.parse(full);
-        recapBox.scrollIntoView({ block: 'nearest' });
-      }
-      toast('Recap generato — usa 💾 Salva per conservarlo');
+    const res = await apiFetch(url, { method: 'POST' });
+    if (!res.ok) throw new Error((await res.json()).detail || 'Errore');
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let full = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      full += decoder.decode(value, { stream: true });
+      recapBox.innerHTML = marked.parse(full);
+      recapBox.scrollIntoView({ block: 'nearest' });
     }
+    toast(doneLabel, 'success');
+    await refreshRecentRecaps();
   } catch(e) {
     box.innerHTML = `<div class="no-recap" style="color:var(--red)">${e.message}</div>`;
     toast(e.message, 'error');
   } finally {
-    genBtn.disabled = saveBtn.disabled = false;
-    genBtn.textContent = '🤖 Genera';
+    dailyBtn.disabled = weeklyBtn.disabled = false;
+    dailyBtn.textContent = '🤖 Daily';
+    weeklyBtn.textContent = '📅 Weekly';
   }
+}
+
+async function refreshRecentRecaps() {
+  try {
+    const res = await apiFetch('/api/recaps/recent');
+    const recaps = await res.json();
+    const container = document.querySelector('.sidebar-section:last-child');
+    if (!container) return;
+    const list = recaps.map(r => {
+      const d = new Date(r.recap_date + 'T12:00:00');
+      const label = d.toLocaleDateString('it-IT', { day: '2-digit', month: 'short', year: 'numeric' });
+      const time = r.created_at ? r.created_at.slice(11, 16) : '';
+      const preview = r.summary.slice(0, 90);
+      return `
+      <div class="recap-day" id="recap-row-${r.id}">
+        <div class="recap-day-body" onclick="loadRecap(${r.id})">
+          <div class="recap-day-date">${label} <span style="opacity:0.55">${time}</span> &mdash; ${r.notes_count} note</div>
+          <div class="recap-day-preview">${escHtml(preview)}...</div>
+        </div>
+        <button class="recap-delete-btn" onclick="deleteRecap(${r.id})" title="Elimina recap">✕</button>
+      </div>`;
+    }).join('');
+    const header = container.querySelector('.section-header');
+    const existing = container.querySelectorAll('.recap-day, .no-recap');
+    existing.forEach(el => el.remove());
+    header.insertAdjacentHTML('afterend', list || '<div class="no-recap">Nessun recap recente.</div>');
+  } catch(e) { console.error(e); }
+}
+
+async function generateRecap() {
+  document.getElementById('gen-daily-btn').textContent = '⏳ Generando...';
+  await _streamToRecapBox('/api/recap', 'Recap daily salvato 💾');
+}
+
+async function generateWeeklyRecap() {
+  document.getElementById('gen-weekly-btn').textContent = '⏳ Generando...';
+  await _streamToRecapBox('/api/recap/weekly', 'Recap weekly salvato 💾');
 }
 
 // ── Model selector ────────────────────────────────────────────────────────────
@@ -1063,7 +1490,7 @@ async function loadBoard() {
   if (project) params.set('project', project);
   if (assignee) params.set('assignee', assignee);
   try {
-    const res = await fetch('/api/board?' + params);
+    const res = await apiFetch('/api/board?' + params);
     const data = await res.json();
     renderBoard(data);
   } catch(e) { console.error(e); }
@@ -1079,6 +1506,7 @@ function renderBoard(data) {
   const container = document.getElementById('board-container');
   const today = new Date().toISOString().slice(0,10);
   const COLS = [
+    { key: 'inbox',    label: '📥 Inbox',     color: 'var(--text-muted)' },
     { key: 'backlog',  label: '🗂 Backlog',   color: '#64748b' },
     { key: 'todo',     label: '⬜ Todo',      color: 'var(--blue)' },
     { key: 'wip',      label: '🔄 In corso',  color: 'var(--yellow)' },
@@ -1117,68 +1545,80 @@ function boardCard(n, today) {
   </div>`;
 }
 
-// ── Focus ─────────────────────────────────────────────────────────────────────
-let focusCollapsed = false;
-
-async function loadFocus() {
-  if (!isToday(currentDate)) {
-    document.getElementById('focus-section').style.display = 'none';
-    return;
+// ── Inline edit: tags, project, assignee ─────────────────────────────────────
+function editTags(container, noteId, currentTags) {
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = currentTags;
+  input.placeholder = 'tag1, tag2, ...';
+  input.style.cssText = 'background:var(--surface2);border:1px solid var(--accent);border-radius:6px;color:var(--text);font-size:0.72rem;padding:2px 8px;outline:none;min-width:120px;max-width:200px;';
+  container.replaceWith(input);
+  input.focus();
+  input.select();
+  const reload = () => activeTab === 'due' ? loadDueNotes() : loadNotes();
+  async function save() {
+    const val = normalizeTags(input.value);
+    try {
+      await patchNote(noteId, { tags: val });
+    } catch { toast('Errore aggiornamento tag', 'error'); }
+    reload();
   }
-  try {
-    const res = await fetch('/api/focus');
-    const data = await res.json();
-    renderFocus(data);
-  } catch(e) { console.error(e); }
+  input.onblur = save;
+  input.onkeydown = e => {
+    if (e.key === 'Enter') input.blur();
+    if (e.key === 'Escape') reload();
+  };
 }
 
-function renderFocus(data) {
-  const section = document.getElementById('focus-section');
-  const total = data.wip.length + data.blocked.length + data.due_today.length;
-  if (!total) { section.style.display = 'none'; return; }
-  section.style.display = 'block';
-
-  const counts = [];
-  if (data.blocked.length) counts.push(`🚫 ${data.blocked.length}`);
-  if (data.waiting.length) counts.push(`⏳ ${data.waiting.length}`);
-  if (data.wip.length) counts.push(`🔄 ${data.wip.length}`);
-  if (data.due_today.length) counts.push(`🔴 ${data.due_today.length}`);
-  document.getElementById('focus-counts').textContent = counts.join('  ');
-
-  let html = '';
-  if (data.blocked.length) {
-    html += `<div><div class="focus-group-label" style="color:var(--red)">🚫 Bloccati</div>${data.blocked.map(n => focusCard(n,'blocked')).join('')}</div>`;
+function editProject(el, noteId, currentProject) {
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = currentProject;
+  input.placeholder = 'progetto';
+  input.style.cssText = 'background:var(--surface2);border:1px solid var(--accent);border-radius:6px;color:var(--text);font-size:0.72rem;padding:2px 8px;outline:none;width:120px;';
+  el.replaceWith(input);
+  input.focus();
+  input.select();
+  const reload = () => activeTab === 'due' ? loadDueNotes() : loadNotes();
+  async function save() {
+    const raw = input.value.trim();
+    const val = raw ? normalizeProject(raw) : '';
+    try {
+      await patchNote(noteId, { project: val });
+      if (val) toast(`Progetto: ${val}`); else toast('Progetto rimosso');
+    } catch { toast('Errore aggiornamento progetto', 'error'); }
+    reload();
   }
-  if (data.waiting.length) {
-    html += `<div><div class="focus-group-label" style="color:#a78bfa">⏳ In attesa</div>${data.waiting.map(n => focusCard(n,'waiting')).join('')}</div>`;
-  }
-  if (data.wip.length) {
-    html += `<div><div class="focus-group-label" style="color:var(--yellow)">🔄 In corso</div>${data.wip.map(n => focusCard(n,'wip')).join('')}</div>`;
-  }
-  if (data.due_today.length) {
-    html += `<div><div class="focus-group-label" style="color:var(--accent)">🔴 Scade oggi</div>${data.due_today.map(n => focusCard(n,'due-today')).join('')}</div>`;
-  }
-  document.getElementById('focus-body').innerHTML = html;
-  document.getElementById('focus-body').style.display = focusCollapsed ? 'none' : 'flex';
+  input.onblur = save;
+  input.onkeydown = e => {
+    if (e.key === 'Enter') input.blur();
+    if (e.key === 'Escape') reload();
+  };
 }
 
-function focusCard(n, type) {
-  const assigneeHtml = n.assignee ? `<span class="assignee-badge">@${escHtml(n.assignee)}</span>` : '';
-  const projHtml = n.project ? `<span class="project-badge">${escHtml(n.project)}</span>` : '';
-  const statusHtml = n.status ? `<span class="status status-${n.status}" onclick="cycleStatus(${n.id},'${n.status||''}')" style="cursor:pointer">${STATUS_LABEL[n.status]}</span>` : '';
-  return `
-  <div class="focus-card ${type}" data-id="${n.id}">
-    <div style="flex:1;min-width:0">
-      <div class="focus-card-content">${escHtml(n.content)}</div>
-      ${(projHtml||assigneeHtml||statusHtml) ? `<div class="focus-card-meta">${projHtml}${assigneeHtml}${statusHtml}</div>` : ''}
-    </div>
-  </div>`;
-}
-
-function toggleFocus() {
-  focusCollapsed = !focusCollapsed;
-  document.getElementById('focus-body').style.display = focusCollapsed ? 'none' : 'flex';
-  document.getElementById('focus-toggle').textContent = focusCollapsed ? '▼' : '▲';
+function editAssignee(el, noteId, currentAssignee) {
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = currentAssignee;
+  input.placeholder = '@persona';
+  input.style.cssText = 'background:var(--surface2);border:1px solid var(--accent);border-radius:6px;color:var(--text);font-size:0.72rem;padding:2px 8px;outline:none;width:100px;';
+  el.replaceWith(input);
+  input.focus();
+  input.select();
+  const reload = () => activeTab === 'due' ? loadDueNotes() : loadNotes();
+  async function save() {
+    const val = input.value.trim().replace(/^@/, '');
+    try {
+      await patchNote(noteId, { assignee: val });
+      if (val) toast(`@${val}`); else toast('Assignee rimosso');
+    } catch { toast('Errore aggiornamento assignee', 'error'); }
+    reload();
+  }
+  input.onblur = save;
+  input.onkeydown = e => {
+    if (e.key === 'Enter') input.blur();
+    if (e.key === 'Escape') reload();
+  };
 }
 
 // ── Keyboard shortcuts ────────────────────────────────────────────────────────
@@ -1208,6 +1648,26 @@ document.addEventListener('keydown', e => {
   if (e.key === '?') { e.preventDefault(); toggleShortcuts(); }
 });
 
+// ── Confirm modal ─────────────────────────────────────────────────────────────
+let _confirmResolve = null;
+
+function showConfirm(title, body, confirmLabel = 'Elimina') {
+  document.getElementById('confirm-title').textContent = title;
+  document.getElementById('confirm-body').innerHTML = body;
+  document.getElementById('confirm-ok').textContent = confirmLabel;
+  document.getElementById('confirm-modal').classList.add('show');
+  return new Promise(resolve => {
+    _confirmResolve = resolve;
+    document.getElementById('confirm-ok').onclick = () => { closeConfirm(); resolve(true); };
+  });
+}
+
+function closeConfirm(e) {
+  if (e && e.target !== document.getElementById('confirm-modal')) return;
+  document.getElementById('confirm-modal').classList.remove('show');
+  if (_confirmResolve) { _confirmResolve(false); _confirmResolve = null; }
+}
+
 function toggleShortcuts() {
   document.getElementById('shortcuts-modal').classList.toggle('show');
 }
@@ -1216,6 +1676,263 @@ function closeShortcuts(e) {
   if (!e || e.target === document.getElementById('shortcuts-modal')) {
     document.getElementById('shortcuts-modal').classList.remove('show');
   }
+}
+
+function goToNote(e, dateStr) {
+  e.preventDefault();
+  switchTab('notes');
+  navigateToDate(dateStr);
+}
+
+// ── Gantt ─────────────────────────────────────────────────────────────────────
+const GANTT_COLORS = ['#818cf8','#60a5fa','#34d399','#fbbf24','#f87171','#a78bfa','#fb923c','#2dd4bf','#f472b6','#a3e635'];
+let ganttSelectedColor = GANTT_COLORS[0];
+let ganttData = null;
+
+(function initColorPicker() {
+  const picker = document.getElementById('gantt-color-picker');
+  if (!picker) return;
+  GANTT_COLORS.forEach((c, i) => {
+    const d = document.createElement('div');
+    d.className = 'gantt-color-swatch' + (i === 0 ? ' selected' : '');
+    d.style.background = c;
+    d.onclick = () => {
+      ganttSelectedColor = c;
+      picker.querySelectorAll('.gantt-color-swatch').forEach(s => s.classList.remove('selected'));
+      d.classList.add('selected');
+    };
+    picker.appendChild(d);
+  });
+})();
+
+async function loadGantt() {
+  try {
+    const res = await apiFetch('/api/gantt');
+    ganttData = await res.json();
+    renderGanttPanel(ganttData);
+    renderGanttChart(ganttData);
+  } catch(e) { console.error(e); }
+}
+
+function renderGanttPanel(data) {
+  const list = document.getElementById('gantt-projects-list');
+  if (!data.projects.length) {
+    list.innerHTML = '<div style="color:var(--text-dim);font-size:0.8rem;padding:8px 0">Nessun progetto. Aggiungine uno qui sotto.</div>';
+    return;
+  }
+  list.innerHTML = data.projects.map(p => `
+    <div class="gantt-project-item">
+      <div class="gantt-project-header">
+        <div class="gantt-project-dot" style="background:${p.color}"></div>
+        <span class="gantt-project-name">${escHtml(p.name)}</span>
+        <button class="gantt-project-del" onclick="deleteGanttProject(${p.id},event)" title="Elimina progetto">✕</button>
+      </div>
+      <div class="gantt-milestones-list">
+        ${p.milestones.map(m => `
+          <div class="gantt-ms-item" data-mid="${m.id}">
+            <span style="width:6px;height:6px;border-radius:50%;background:${p.color};flex-shrink:0;display:inline-block;margin-top:4px"></span>
+            <div class="gantt-ms-body">
+              <span>${escHtml(m.name)}</span>
+              <span class="gantt-ms-dates">${m.start_date} → ${m.end_date}</span>
+            </div>
+            <button class="gantt-ms-del" onclick="deleteMilestone(${m.id},event)" title="Elimina">✕</button>
+          </div>
+        `).join('')}
+      </div>
+      <button class="gantt-add-ms-btn" onclick="toggleAddMilestone(${p.id},this)">+ milestone</button>
+      <form class="gantt-add-ms-form" id="gantt-ms-form-${p.id}" onsubmit="addMilestone(event,${p.id})">
+        <input class="gantt-input" name="name" placeholder="Nome milestone" maxlength="80" required style="font-size:0.75rem;padding:3px 7px;">
+        <div style="display:flex;gap:4px;">
+          <input class="gantt-input" type="date" name="start" required style="font-size:0.75rem;padding:3px 7px;">
+          <input class="gantt-input" type="date" name="end" required style="font-size:0.75rem;padding:3px 7px;">
+        </div>
+        <div style="display:flex;gap:4px;">
+          <button type="submit" class="gantt-btn-sm">Aggiungi</button>
+          <button type="button" class="gantt-btn-sm" onclick="toggleAddMilestone(${p.id},this.closest('form').previousElementSibling)">Annulla</button>
+        </div>
+      </form>
+    </div>
+  `).join('');
+}
+
+function toggleAddMilestone(projectId, btn) {
+  const form = document.getElementById(`gantt-ms-form-${projectId}`);
+  form.classList.toggle('open');
+}
+
+function renderGanttChart(data) {
+  const chart = document.getElementById('gantt-chart');
+  if (!data.projects.length || !data.projects.some(p => p.milestones.length)) {
+    chart.innerHTML = '<div class="gantt-empty">Aggiungi un progetto e le sue milestone per visualizzare il Gantt.<br>Le note con scadenza appariranno come ◆ sulla timeline.</div>';
+    return;
+  }
+
+  // Calculate date range
+  let minDate = null, maxDate = null;
+  for (const p of data.projects) {
+    for (const m of p.milestones) {
+      if (!minDate || m.start_date < minDate) minDate = m.start_date;
+      if (!maxDate || m.end_date > maxDate) maxDate = m.end_date;
+    }
+  }
+  if (!minDate) { chart.innerHTML = '<div class="gantt-empty">Aggiungi delle milestone per visualizzare il Gantt.</div>'; return; }
+
+  // Add padding
+  const startD = new Date(minDate + 'T00:00:00'); startD.setDate(startD.getDate() - 3);
+  const endD = new Date(maxDate + 'T00:00:00'); endD.setDate(endD.getDate() + 7);
+  const totalMs = endD - startD;
+  const totalDays = totalMs / 86400000;
+
+  function pct(dateStr) {
+    const d = new Date(dateStr + 'T00:00:00');
+    return Math.max(0, Math.min(100, (d - startD) / totalMs * 100)).toFixed(2);
+  }
+
+  const todayStr = new Date().toISOString().slice(0,10);
+
+  // Build scale header marks
+  const zoom = totalDays < 60 ? 'day' : totalDays < 180 ? 'week' : 'month';
+  let scaleMarks = '';
+  const cur = new Date(startD);
+  while (cur <= endD) {
+    const left = pct(cur.toISOString().slice(0,10));
+    const width = zoom === 'day' ? (1/totalDays*100).toFixed(2)
+                : zoom === 'week' ? (7/totalDays*100).toFixed(2)
+                : (() => {
+                    const daysInMonth = new Date(cur.getFullYear(), cur.getMonth()+1, 0).getDate();
+                    return (daysInMonth/totalDays*100).toFixed(2);
+                  })();
+    const label = zoom === 'day'
+      ? cur.toLocaleDateString('it-IT', {day:'2-digit',month:'2-digit'})
+      : zoom === 'week'
+      ? `W${getWeekNumber(cur)}`
+      : cur.toLocaleDateString('it-IT', {month:'short',year:'2-digit'});
+    scaleMarks += `<div class="gantt-scale-mark" style="left:${left}%;width:${width}%">${label}</div>`;
+    if (zoom === 'day') cur.setDate(cur.getDate()+1);
+    else if (zoom === 'week') cur.setDate(cur.getDate()+7);
+    else cur.setMonth(cur.getMonth()+1);
+  }
+
+  // Today line
+  const todayLeft = pct(todayStr);
+  const todayLine = `<div class="gantt-today-line" style="left:${todayLeft}%" title="Oggi"></div>`;
+
+  // Build rows
+  let rowsHtml = '';
+  for (const p of data.projects) {
+    if (!p.milestones.length) continue;
+    // Project label row
+    rowsHtml += `
+    <div class="gantt-row" style="margin-bottom:2px;margin-top:12px;">
+      <div class="gantt-row-label project">${escHtml(p.name)}</div>
+      <div class="gantt-row-track" style="height:4px;"><div class="gantt-track-bg" style="opacity:0.3"></div>${todayLine}</div>
+    </div>`;
+
+    // Milestone rows
+    for (const m of p.milestones) {
+      const barLeft = pct(m.start_date);
+      const barRight = pct(m.end_date);
+      const barWidth = (parseFloat(barRight) - parseFloat(barLeft)).toFixed(2);
+      rowsHtml += `
+      <div class="gantt-row">
+        <div class="gantt-row-label" title="${escHtml(m.name)}">${escHtml(m.name)}</div>
+        <div class="gantt-row-track">
+          <div class="gantt-track-bg"></div>
+          ${todayLine}
+          <div class="gantt-bar" style="left:${barLeft}%;width:${barWidth}%;background:${p.color}" title="${m.start_date} → ${m.end_date}">${escHtml(m.name)}</div>
+        </div>
+      </div>`;
+    }
+
+    // One row per note with due_date
+    for (const n of p.notes) {
+      const noteLeft = pct(n.due_date);
+      const assigneeTip = n.assignee ? ` · @${n.assignee}` : '';
+      const tooltip = `#${n.id} ${n.content} (${n.due_date})${assigneeTip}`;
+      const labelText = `#${n.id} ${n.content.length > 28 ? n.content.slice(0, 28) + '…' : n.content}`;
+      const doneStyle = n.status === 'done' ? 'opacity:0.45;text-decoration:line-through' : '';
+      rowsHtml += `
+      <div class="gantt-row gantt-notes-row">
+        <div class="gantt-row-label" style="${doneStyle}">
+          <a href="#" onclick="goToNote(event,'${n.created_at}')" title="${escHtml(tooltip)}" style="color:var(--text-dim);text-decoration:none;font-size:0.68rem;font-style:italic;" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-dim)'">${escHtml(labelText)}</a>
+        </div>
+        <div class="gantt-row-track" style="height:24px;">
+          ${todayLine}
+          <div class="gantt-diamond overdue" style="left:${noteLeft}%;background:var(--red);${n.status==='done'?'opacity:0.35':''}" title="${escHtml(tooltip)}"></div>
+        </div>
+      </div>`;
+    }
+  }
+
+  chart.innerHTML = `
+  <div class="gantt-container">
+    <div class="gantt-header-row">
+      <div class="gantt-label-col"></div>
+      <div class="gantt-scale" style="position:relative;height:20px;">${scaleMarks}</div>
+    </div>
+    <div class="gantt-body">${rowsHtml}</div>
+  </div>`;
+}
+
+function getWeekNumber(d) {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  return Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
+}
+
+async function addGanttProject() {
+  const name = normalizeProject(document.getElementById('gantt-proj-name').value);
+  if (!name) return;
+  try {
+    await apiFetch('/api/gantt/projects', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({name, color: ganttSelectedColor}),
+    });
+    document.getElementById('gantt-proj-name').value = '';
+    toast('Progetto aggiunto', 'success');
+    await loadGantt();
+  } catch { toast('Errore', 'error'); }
+}
+
+async function deleteGanttProject(id, e) {
+  e.stopPropagation();
+  try {
+    await fetch(`/api/gantt/projects/${id}`, {method:'DELETE'});
+    toast('Progetto eliminato');
+    await loadGantt();
+  } catch { toast('Errore eliminazione', 'error'); }
+}
+
+async function addMilestone(e, projectId) {
+  e.preventDefault();
+  const form = e.target;
+  const name = form.name.value.trim();
+  const start = form.start.value;
+  const end = form.end.value;
+  if (!name || !start || !end) return;
+  try {
+    await fetch('/api/gantt/milestones', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({project_id: projectId, name, start_date: start, end_date: end}),
+    });
+    form.reset();
+    form.classList.remove('open');
+    toast('Milestone aggiunta', 'success');
+    await loadGantt();
+  } catch { toast('Errore', 'error'); }
+}
+
+async function deleteMilestone(id, e) {
+  e.stopPropagation();
+  try {
+    await fetch(`/api/gantt/milestones/${id}`, {method:'DELETE'});
+    toast('Milestone eliminata');
+    await loadGantt();
+  } catch { toast('Errore eliminazione', 'error'); }
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
