@@ -23,6 +23,7 @@ class Note(SQLModel, table=True):
     status: Optional[str] = None   # backlog | todo | wip | waiting | blocked | done
     assignee: Optional[str] = None
     context: str = Field(default="default")
+    sort_order: int = Field(default=0)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 
@@ -44,6 +45,7 @@ class GanttProject(SQLModel, table=True):
     name: str
     color: str = Field(default="#818cf8")
     context: str = Field(default="default")
+    is_background: bool = Field(default=False)
     created_at: datetime = Field(default_factory=datetime.now)
 
 

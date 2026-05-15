@@ -19,6 +19,8 @@ def _migrate():
             "ALTER TABLE note ADD COLUMN context VARCHAR DEFAULT 'default'",
             "ALTER TABLE recap ADD COLUMN context VARCHAR DEFAULT 'default'",
             "ALTER TABLE ganttproject ADD COLUMN context VARCHAR DEFAULT 'default'",
+            "ALTER TABLE note ADD COLUMN sort_order INTEGER DEFAULT 0",
+            "ALTER TABLE ganttproject ADD COLUMN is_background BOOLEAN DEFAULT 0",
         ]
         for sql in migrations:
             try:

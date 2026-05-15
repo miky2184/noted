@@ -54,6 +54,21 @@ def get_schedule() -> dict | None:
     return _load().get("schedule")
 
 
+def get_scheduler_status() -> dict | None:
+    return _load().get("scheduler_status")
+
+
+def set_scheduler_status(ok: bool, error: str | None = None) -> None:
+    from datetime import datetime
+    data = _load()
+    data["scheduler_status"] = {
+        "ok": ok,
+        "ts": datetime.now().isoformat(timespec="seconds"),
+        "error": error,
+    }
+    _save(data)
+
+
 def set_schedule(time_str: str | None, days: list[int] | None, recap_type: str = "daily") -> None:
     data = _load()
     if time_str is None:

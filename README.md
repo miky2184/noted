@@ -100,6 +100,17 @@ Ogni contesto è un database logico separato — note, recap e Gantt non si mesc
 - Modifica inline di contenuto, tag, progetto, assegnatario e scadenza direttamente sulla nota
 - Navigazione tra giorni con le frecce `‹ ›`
 
+### Tab Oggi — Input vocale
+
+Accanto all'area testo è presente il bottone 🎙 per registrare una nota a voce:
+
+1. Click → richiesta permesso microfono → registrazione avvia
+2. Click **⏹ Ferma** → ascolto del registrato con player audio
+3. Click **✦ Trascrivi** → trascrizione locale via [Whisper](https://github.com/openai/whisper) (nessun dato inviato al cloud)
+4. Testo modificabile → **Usa come nota** → popola l'input e puoi completare con tag/progetto prima di inviare
+
+> La trascrizione usa il modello `base` di Whisper in italiano. Al primo avvio scarica il modello (~140 MB).
+
 ### Tab Board
 
 Kanban a 7 colonne: **Inbox** · **Backlog** · **Todo** · **WIP** · **Waiting** · **Blocked** · **Done**
@@ -107,6 +118,7 @@ Kanban a 7 colonne: **Inbox** · **Backlog** · **Todo** · **WIP** · **Waiting
 - **Inbox** raccoglie le note senza stato degli ultimi 7 giorni (non si perdono tra i giorni)
 - Click sullo stato per avanzarlo nel ciclo
 - Filtri per progetto e assegnatario
+- **Drag & drop** tra colonne e all'interno della stessa colonna (ordine persistito via `sort_order`)
 
 ### Tab Scadenze
 
@@ -117,9 +129,11 @@ Note con `due_date` impostata raggruppate in: ⚠️ Scadute · 🔴 Oggi · �
 Timeline visiva per pianificare progetti:
 
 - **Progetti** con colore personalizzabile (10 palette predefinite)
-- **Milestone** con date di inizio/fine — barre colorate sulla timeline
-- **Note con scadenza** appaiono come ◆ rossi sulla riga del progetto corrispondente; il tooltip mostra contenuto, data e assegnatario; click → vai alla nota
-- Zoom automatico: giornaliero / settimanale / mensile in base all'arco temporale
+- **Milestone** con date di inizio/fine — barre colorate sulla timeline; all'aggiunta viene creata automaticamente una nota con `tag=milestone`, `status=todo`, `due=end_date`
+- **Note con scadenza** appaiono come ◆ sulla riga del progetto; tooltip con contenuto, data, assegnatario; click → vai alla nota
+- **Progetti sfondo** (flag "Usa come sfondo") — visualizzati come bande colorate a tutta altezza (es. ferie, sprint, freeze)
+- **Avvisi at-risk** 🔴 su milestone con `end_date ≤ oggi+7gg` e note in stato `blocked`, `waiting` o `backlog`
+- **Zoom**: Giorno · Settimana · Mese · Auto (adattivo all'arco temporale)
 - Linea verticale "oggi" sempre visibile
 
 ### Recap AI
@@ -130,6 +144,7 @@ Timeline visiva per pianificare progetti:
 - Lista "Ultimi recap" nella sidebar aggiornata dinamicamente dopo ogni generazione
 - Click su un recap → caricato nella box senza ricaricare la pagina; orario visibile per distinguere più recap dello stesso giorno
 - Selezione modello AI: ⚡ Haiku 4.5 · ✦ Sonnet 4.6 · ◆ Opus 4.7
+- **⏰ Recap automatico** — schedulazione giornaliera o settimanale con orario e giorni della settimana configurabili dalla UI
 
 ### Backup e Ripristino
 
@@ -177,6 +192,7 @@ noted add "standup: allineamento finops con Global ACN"
 noted add "problema DAG scheduler" --tag airflow --project deutsche-bank
 noted add "deploy entro venerdì" --due 2026-01-17 --priority high --status todo
 noted add "review PR" --assignee marco
+noted add "task su progetto secondario" --ctx home
 ```
 
 | Opzione | Descrizione |
@@ -187,14 +203,16 @@ noted add "review PR" --assignee marco
 | `--due` / `-d` | Scadenza: `YYYY-MM-DD` |
 | `--status` / `-s` | `backlog` \| `todo` \| `wip` \| `waiting` \| `blocked` \| `done` |
 | `--assignee` / `-a` | Assegnatario |
+| `--ctx` / `-c` | Contesto (default: `default`) |
 
 ```bash
-noted list                          # ultime 20 note di oggi
+noted list                          # ultime 20 note
 noted list --tag airflow            # filtra per tag
 noted list --project finops         # filtra per progetto
 noted list --date 2026-01-15        # data specifica
 noted list --status wip             # filtra per stato
 noted list --assignee marco         # filtra per assegnatario
+noted list --ctx work               # filtra per contesto
 
 noted search "deploy"               # ricerca full-text
 
@@ -209,9 +227,11 @@ noted delete 42
 ### Recap AI
 
 ```bash
-noted recap                         # recap di oggi
+noted recap                         # recap di oggi (contesto default)
+noted recap --ctx work              # recap del contesto "work"
 noted recap --date 2026-01-15       # recap di un giorno specifico
 noted recap --weekly                # recap settimanale
+noted recap --save                  # genera e salva nel DB
 noted delete-recap 7
 ```
 

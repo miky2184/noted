@@ -26,3 +26,9 @@ def config_path() -> Path:
 
 def log_path() -> Path:
     return data_dir() / "noted.log"
+
+def cert_path() -> Path:
+    return config_dir() / "noted.local.pem"
+
+def key_path() -> Path:
+    return config_dir() / "noted.local-key.pem"

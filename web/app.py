@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, Query, HTTPException
+from fastapi import FastAPI, Request, Query, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
@@ -8,7 +8,15 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Optional, List
 import asyncio
+import logging
 import sys
+
+logging.basicConfig(
+    filename=Path("~/.noted/scheduler.log").expanduser(),
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
+_log = logging.getLogger("noted.scheduler")
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -18,17 +26,20 @@ from db import crud
 
 def _do_scheduled_recap():
     """Generate today's recap for every context that has notes and no recap yet."""
-    from db.config import get_schedule
+    from db.config import get_schedule, set_scheduler_status
     schedule = get_schedule()
     recap_type = schedule.get("type", "daily") if schedule else "daily"
+    _log.info("Scheduler avviato (type=%s)", recap_type)
 
     with get_session() as session:
         contexts = crud.get_contexts(session)
+
     for ctx_obj in contexts:
         ctx = ctx_obj.name
         try:
             with get_session() as session:
                 if crud.get_recap(session, day=date.today(), ctx=ctx):
+                    _log.info("ctx=%s: recap già presente, skip", ctx)
                     continue
                 gantt = crud.get_gantt_data(session, ctx=ctx)
                 if recap_type == "weekly":
@@ -36,6 +47,7 @@ def _do_scheduled_recap():
                 else:
                     notes = crud.get_notes_for_recap(session, day=date.today(), ctx=ctx)
                 if not notes:
+                    _log.info("ctx=%s: nessuna nota, skip", ctx)
                     continue
             if recap_type == "weekly":
                 from ai.recap import generate_weekly_from_notes_sync
@@ -46,8 +58,13 @@ def _do_scheduled_recap():
             with get_session() as session:
                 crud.save_recap(session, summary=summary, notes_count=len(notes),
                                 recap_date=date.today(), ctx=ctx)
-        except Exception:
-            pass
+            _log.info("ctx=%s: recap salvato (%d note)", ctx, len(notes))
+        except Exception as exc:
+            _log.error("ctx=%s: errore — %s", ctx, exc)
+            set_scheduler_status(ok=False, error=str(exc))
+            return
+
+    set_scheduler_status(ok=True)
 
 
 async def _scheduler_loop():
@@ -262,6 +279,29 @@ async def api_delete_note(note_id: int):
         raise HTTPException(status_code=404, detail="Nota non trovata")
 
 
+class MoveNote(BaseModel):
+    status: Optional[str] = None
+    column_ids: List[int] = []
+
+@app.patch("/api/notes/{note_id}/move", status_code=204)
+async def api_move_note(note_id: int, body: MoveNote, request: Request):
+    from db.models import Note as NoteModel
+    ctx = _get_ctx(request)
+    with get_session() as session:
+        note = session.get(NoteModel, note_id)
+        if not note or note.context != ctx:
+            raise HTTPException(status_code=404, detail="Nota non trovata")
+        if body.status is not None:
+            note.status = body.status if body.status != "inbox" else None
+        for i, nid in enumerate(body.column_ids):
+            n = session.get(NoteModel, nid)
+            if n and n.context == ctx:
+                n.sort_order = i
+                session.add(n)
+        session.add(note)
+        session.commit()
+
+
 @app.get("/api/board")
 async def api_board(
     request: Request,
@@ -289,10 +329,12 @@ async def api_board(
 class GanttProjectCreate(BaseModel):
     name: str
     color: str = "#818cf8"
+    is_background: bool = False
 
 class GanttProjectUpdate(BaseModel):
     name: Optional[str] = None
     color: Optional[str] = None
+    is_background: Optional[bool] = None
 
 class MilestoneCreate(BaseModel):
     project_id: int
@@ -315,15 +357,17 @@ async def api_gantt(request: Request):
 async def api_add_gantt_project(request: Request, body: GanttProjectCreate):
     ctx = _get_ctx(request)
     with get_session() as session:
-        p = crud.add_gantt_project(session, name=body.name, color=body.color, ctx=ctx)
-        return {"id": p.id, "name": p.name, "color": p.color}
+        p = crud.add_gantt_project(session, name=body.name, color=body.color,
+                                   ctx=ctx, is_background=body.is_background)
+        return {"id": p.id, "name": p.name, "color": p.color, "is_background": p.is_background}
 
 @app.patch("/api/gantt/projects/{project_id}")
 async def api_edit_gantt_project(project_id: int, body: GanttProjectUpdate):
     with get_session() as session:
-        p = crud.edit_gantt_project(session, project_id, name=body.name, color=body.color)
+        p = crud.edit_gantt_project(session, project_id, name=body.name, color=body.color,
+                                    is_background=body.is_background)
     if not p: raise HTTPException(status_code=404, detail="Progetto non trovato")
-    return {"id": p.id, "name": p.name, "color": p.color}
+    return {"id": p.id, "name": p.name, "color": p.color, "is_background": p.is_background}
 
 @app.delete("/api/gantt/projects/{project_id}", status_code=204)
 async def api_delete_gantt_project(project_id: int):
@@ -332,12 +376,19 @@ async def api_delete_gantt_project(project_id: int):
     if not ok: raise HTTPException(status_code=404, detail="Progetto non trovato")
 
 @app.post("/api/gantt/milestones", status_code=201)
-async def api_add_milestone(body: MilestoneCreate):
+async def api_add_milestone(body: MilestoneCreate, request: Request):
+    from db.models import GanttProject
+    ctx = _get_ctx(request)
     start = date.fromisoformat(body.start_date)
     end = date.fromisoformat(body.end_date)
     with get_session() as session:
         m = crud.add_milestone(session, project_id=body.project_id, name=body.name,
                                start_date=start, end_date=end)
+        project = session.get(GanttProject, body.project_id)
+        project_name = project.name if project else None
+        if not (project and project.is_background):
+            crud.add_note(session, content=body.name, tags="milestone", project=project_name,
+                          status="todo", due_date=end, ctx=ctx)
         return {"id": m.id, "project_id": m.project_id, "name": m.name,
                 "start_date": str(m.start_date), "end_date": str(m.end_date)}
 
@@ -613,8 +664,13 @@ class ScheduleConfig(BaseModel):
 
 @app.get("/api/schedule")
 async def api_get_schedule():
-    from db.config import get_schedule
-    return get_schedule() or {}
+    from db.config import get_schedule, get_scheduler_status
+    return {**(get_schedule() or {}), "last_run": get_scheduler_status()}
+
+@app.get("/api/schedule/status")
+async def api_scheduler_status():
+    from db.config import get_scheduler_status
+    return get_scheduler_status() or {}
 
 @app.post("/api/schedule")
 async def api_set_schedule(cfg: ScheduleConfig):
@@ -634,3 +690,57 @@ async def api_delete_schedule():
     from db.config import set_schedule
     set_schedule(None, None)
     return {"ok": True}
+
+
+# ── Voice transcription ────────────────────────────────────────────────────────
+
+_whisper_model = None
+
+def _get_whisper_model():
+    global _whisper_model
+    if _whisper_model is None:
+        try:
+            import ssl, whisper
+            # macOS Python non usa i certificati di sistema → patch temporanea per il download del modello
+            _orig = ssl._create_default_https_context
+            ssl._create_default_https_context = ssl._create_unverified_context
+            try:
+                _whisper_model = whisper.load_model("base")
+            finally:
+                ssl._create_default_https_context = _orig
+        except ImportError:
+            raise HTTPException(status_code=501, detail="openai-whisper non installato. Esegui: pip install -e .")
+    return _whisper_model
+
+def _ensure_ffmpeg_in_path():
+    """Aggiunge le dir Homebrew al PATH se ffmpeg non è già trovabile."""
+    import os, shutil
+    if shutil.which("ffmpeg"):
+        return
+    extras = ["/opt/homebrew/bin", "/usr/local/bin", "/opt/homebrew/sbin"]
+    current = os.environ.get("PATH", "")
+    os.environ["PATH"] = ":".join(extras) + (":" + current if current else "")
+
+@app.post("/api/voice/transcribe")
+async def api_voice_transcribe(audio: UploadFile = File(...)):
+    import tempfile, os
+    _ensure_ffmpeg_in_path()
+    suffix = ".webm" if "webm" in (audio.content_type or "") else ".mp4"
+    data = await audio.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Audio vuoto")
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+        f.write(data)
+        tmp_path = f.name
+    try:
+        loop = asyncio.get_event_loop()
+        model = await loop.run_in_executor(None, _get_whisper_model)
+        result = await loop.run_in_executor(None, lambda: model.transcribe(tmp_path, language="it"))
+        return {"text": result["text"].strip()}
+    except Exception as exc:
+        msg = str(exc)
+        if "ffmpeg" in msg.lower() or "No such file or directory" in msg:
+            msg = "ffmpeg non trovato. Installalo con: brew install ffmpeg"
+        raise HTTPException(status_code=500, detail=msg)
+    finally:
+        os.unlink(tmp_path)

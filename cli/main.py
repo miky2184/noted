@@ -57,6 +57,7 @@ def add(
     due: Optional[str] = typer.Option(None, "--due", "-d", help="Scadenza: YYYY-MM-DD"),
     status: Optional[str] = typer.Option(None, "--status", "-s", help="Stato: backlog | todo | wip | waiting | blocked | done"),
     assignee: Optional[str] = typer.Option(None, "--assignee", "-a", help="Assegna a: 'mario' o '@mario'"),
+    ctx: str = typer.Option("default", "--ctx", "-c", help="Contesto (default: default)"),
 ):
     """Aggiungi una nota."""
     _init()
@@ -73,11 +74,10 @@ def add(
     if status and status not in ("backlog", "todo", "wip", "waiting", "blocked", "done"):
         console.print("[red]Stato non valido. Usa: backlog | todo | wip | waiting | blocked | done[/red]")
         raise typer.Exit(1)
-    # Strip leading @ from assignee if present
     if assignee:
         assignee = assignee.lstrip("@")
     with get_session() as session:
-        note = crud.add_note(session, content=content, tags=tag, project=project, priority=priority, due_date=due_date, status=status, assignee=assignee)
+        note = crud.add_note(session, content=content, tags=tag, project=project, priority=priority, due_date=due_date, status=status, assignee=assignee, ctx=ctx)
     color = PRIORITY_COLORS[note.priority]
     proj_str = f" [{note.project}]" if note.project else ""
     tag_str = f" #{note.tags}" if note.tags else ""
@@ -95,8 +95,10 @@ def list_notes(
     tag: Optional[str] = typer.Option(None, "--tag", "-t", help="Filtra per tag"),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Filtra per progetto"),
     assignee: Optional[str] = typer.Option(None, "--assignee", "-a", help="Filtra per assegnatario"),
+    status: Optional[str] = typer.Option(None, "--status", "-s", help="Filtra per stato: backlog | todo | wip | waiting | blocked | done"),
     limit: int = typer.Option(20, "--limit", "-n", help="Numero massimo di note"),
     date_str: Optional[str] = typer.Option(None, "--date", "-d", help="Data specifica: YYYY-MM-DD"),
+    ctx: str = typer.Option("default", "--ctx", "-c", help="Contesto (default: default)"),
 ):
     """Elenca le note."""
     _init()
@@ -111,8 +113,12 @@ def list_notes(
             console.print("[red]Formato data non valido. Usa YYYY-MM-DD[/red]")
             raise typer.Exit(1)
 
+    if status and status not in ("backlog", "todo", "wip", "waiting", "blocked", "done"):
+        console.print("[red]Stato non valido. Usa: backlog | todo | wip | waiting | blocked | done[/red]")
+        raise typer.Exit(1)
+
     with get_session() as session:
-        notes = crud.get_notes(session, day=target_date, tag=tag, project=project, assignee=assignee, limit=limit)
+        notes = crud.get_notes(session, day=target_date, tag=tag, project=project, assignee=assignee, status=status, ctx=ctx, limit=limit)
 
     if not notes:
         console.print("[yellow]Nessuna nota trovata.[/yellow]")
@@ -213,11 +219,12 @@ def edit(
 def search(
     query: str = typer.Argument(..., help="Testo da cercare nelle note"),
     limit: int = typer.Option(20, "--limit", "-n", help="Numero massimo di risultati"),
+    ctx: str = typer.Option("default", "--ctx", "-c", help="Contesto (default: default)"),
 ):
     """Cerca nelle note per testo."""
     _init()
     with get_session() as session:
-        notes = crud.search_notes(session, query=query, limit=limit)
+        notes = crud.search_notes(session, query=query, ctx=ctx, limit=limit)
 
     if not notes:
         console.print(f"[yellow]Nessuna nota trovata per \"{query}\".[/yellow]")
@@ -252,6 +259,7 @@ def recap(
     save: bool = typer.Option(False, "--save", "-s", help="Salva il recap nel DB"),
     date_str: Optional[str] = typer.Option(None, "--date", "-d", help="Data: YYYY-MM-DD (default: oggi)"),
     weekly: bool = typer.Option(False, "--weekly", "-w", help="Recap settimanale"),
+    ctx: str = typer.Option("default", "--ctx", "-c", help="Contesto (default: default)"),
 ):
     """Genera un recap AI delle note del giorno (o della settimana)."""
     _init()
@@ -269,7 +277,7 @@ def recap(
 
     with get_session() as session:
         if weekly:
-            recaps = crud.get_recent_recaps(session, days=7)
+            recaps = crud.get_recent_recaps(session, days=7, ctx=ctx)
             if not recaps:
                 console.print("[yellow]Nessun recap salvato nell'ultima settimana.[/yellow]")
                 return
@@ -282,7 +290,6 @@ def recap(
                 print(chunk, end="", flush=True)
                 chunks.append(chunk)
             print()
-            summary = "".join(chunks)
             return
 
         target_date = date.today()
@@ -293,13 +300,13 @@ def recap(
                 console.print("[red]Formato data non valido. Usa YYYY-MM-DD[/red]")
                 raise typer.Exit(1)
 
-        notes = crud.get_notes_for_recap(session, day=target_date)
+        notes = crud.get_notes_for_recap(session, day=target_date, ctx=ctx)
 
         if not notes:
-            console.print(f"[yellow]Nessuna nota per {target_date.strftime('%d/%m/%Y')}.[/yellow]")
+            console.print(f"[yellow]Nessuna nota per {target_date.strftime('%d/%m/%Y')} (ctx: {ctx}).[/yellow]")
             return
 
-        console.print(f"[dim]🤖 Analisi di {len(notes)} note...[/dim]\n")
+        console.print(f"[dim]🤖 Analisi di {len(notes)} note (ctx: {ctx})...[/dim]\n")
         chunks = []
         for chunk in stream_recap(notes, target_date):
             print(chunk, end="", flush=True)
@@ -308,7 +315,7 @@ def recap(
         summary = "".join(chunks)
 
         if save:
-            crud.save_recap(session, summary=summary, notes_count=len(notes), recap_date=target_date)
+            crud.save_recap(session, summary=summary, notes_count=len(notes), recap_date=target_date, ctx=ctx)
             console.print("\n💾 [green]Recap salvato nel DB.[/green]")
         else:
             console.print("\n[dim]Suggerimento: usa --save per salvare il recap[/dim]")
@@ -340,16 +347,71 @@ def web(
     """Avvia la dashboard web."""
     _init()
     from db.config import get_port
+    from db.paths import cert_path, key_path
     if port is None:
         port = get_port()
     try:
         import uvicorn
         from web.app import app as web_app
-        console.print(f"🌐 Dashboard su http://{host}:{port}")
-        uvicorn.run(web_app, host=host, port=port)
+        ssl_cert = cert_path()
+        ssl_key = key_path()
+        if ssl_cert.exists() and ssl_key.exists():
+            console.print(f"🔒 Dashboard su [link]https://noted.local:{port}[/link]")
+            uvicorn.run(web_app, host=host, port=port,
+                        ssl_certfile=str(ssl_cert), ssl_keyfile=str(ssl_key))
+        else:
+            console.print(f"🌐 Dashboard su http://{host}:{port}")
+            console.print("[dim]💡 Per abilitare HTTPS (richiesto dal microfono) esegui: noted setup-https[/dim]")
+            uvicorn.run(web_app, host=host, port=port)
     except ImportError:
         console.print("[red]fastapi/uvicorn non installati. Esegui: pip install fastapi uvicorn jinja2[/red]")
         raise typer.Exit(1)
+
+
+# ── SETUP-HTTPS ────────────────────────────────────────────────────────────────
+
+@app.command(name="setup-https")
+def setup_https():
+    """Configura HTTPS locale con mkcert (abilita microfono su noted.local)."""
+    import shutil, subprocess
+    from db.paths import cert_path, key_path, config_dir
+
+    mkcert = shutil.which("mkcert")
+    if not mkcert:
+        console.print("[red]mkcert non trovato.[/red]")
+        console.print("[dim]Installalo con:  brew install mkcert[/dim]")
+        console.print("[dim]Poi riesegui:    noted setup-https[/dim]")
+        raise typer.Exit(1)
+
+    # 1. Installa CA nel keychain di sistema (chiede password sudo una volta sola)
+    console.print("[cyan]Installo la CA locale nel keychain di sistema…[/cyan]")
+    r = subprocess.run([mkcert, "-install"], capture_output=True, text=True)
+    if r.returncode != 0:
+        console.print(f"[red]mkcert -install fallito:[/red]\n{r.stderr.strip()}")
+        raise typer.Exit(1)
+
+    # 2. Genera il certificato per noted.local
+    out_dir = config_dir()
+    cert_file = cert_path()
+    key_file = key_path()
+    console.print(f"[cyan]Genero il certificato per noted.local…[/cyan]")
+    r = subprocess.run(
+        [mkcert,
+         "-cert-file", str(cert_file),
+         "-key-file",  str(key_file),
+         "noted.local", "127.0.0.1", "localhost"],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        console.print(f"[red]Generazione certificato fallita:[/red]\n{r.stderr.strip()}")
+        raise typer.Exit(1)
+
+    console.print("✅ [green]Certificato creato e fidato dal browser.[/green]")
+    console.print(f"[dim]  {cert_file}[/dim]")
+    console.print(f"[dim]  {key_file}[/dim]")
+    console.print("\n[bold]Prossimi passi:[/bold]")
+    console.print("  1. noted restart   [dim]# riavvia il servizio in modalità HTTPS[/dim]")
+    console.print("  2. Apri [link]https://noted.local:7979[/link]")
 
 
 # ── SET-MODEL ──────────────────────────────────────────────────────────────────

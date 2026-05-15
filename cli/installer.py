@@ -28,12 +28,15 @@ LAUNCHD_PLIST = Path.home() / "Library" / "LaunchAgents" / f"{LAUNCHD_LABEL}.pli
 
 def _mac_env_vars() -> str:
     api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    api_key_entry = f"""
+        <key>ANTHROPIC_API_KEY</key>
+        <string>{api_key}</string>""" if api_key else ""
     return f"""
     <key>EnvironmentVariables</key>
     <dict>
-        <key>ANTHROPIC_API_KEY</key>
-        <string>{api_key}</string>
-    </dict>""" if api_key else ""
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>{api_key_entry}
+    </dict>"""
 
 
 def install_mac(port: int) -> None:

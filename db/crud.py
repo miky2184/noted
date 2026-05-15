@@ -1,7 +1,7 @@
 from datetime import date, datetime, timedelta
 from typing import Optional
 from sqlmodel import Session, select
-from sqlalchemy import or_
+from sqlalchemy import or_, delete as sa_delete
 from db.models import Note, Recap, GanttProject, Milestone, Context
 
 
@@ -39,6 +39,16 @@ def delete_context(session: Session, ctx_id: int) -> bool:
     ctx = session.get(Context, ctx_id)
     if not ctx or ctx.name == "default":
         return False
+    ctx_name = ctx.name
+    # Cascade: delete milestones → gantt projects → recaps → notes
+    project_ids = session.exec(
+        select(GanttProject.id).where(GanttProject.context == ctx_name)
+    ).all()
+    if project_ids:
+        session.exec(sa_delete(Milestone).where(Milestone.project_id.in_(project_ids)))
+    session.exec(sa_delete(GanttProject).where(GanttProject.context == ctx_name))
+    session.exec(sa_delete(Recap).where(Recap.context == ctx_name))
+    session.exec(sa_delete(Note).where(Note.context == ctx_name))
     session.delete(ctx)
     session.commit()
     return True
@@ -162,7 +172,7 @@ def get_board_notes(
         stmt = stmt.where(Note.project.ilike(f"%{project}%"))
     if assignee:
         stmt = stmt.where(Note.assignee.ilike(f"%{assignee}%"))
-    stmt = stmt.order_by(Note.created_at.desc()).limit(500)
+    stmt = stmt.order_by(Note.sort_order.asc(), Note.created_at.desc()).limit(500)
     return session.exec(stmt).all()
 
 
@@ -184,7 +194,7 @@ def get_inbox_notes(
         stmt = stmt.where(Note.project.ilike(f"%{project}%"))
     if assignee:
         stmt = stmt.where(Note.assignee.ilike(f"%{assignee}%"))
-    stmt = stmt.order_by(Note.created_at.desc()).limit(limit)
+    stmt = stmt.order_by(Note.sort_order.asc(), Note.created_at.desc()).limit(limit)
     return session.exec(stmt).all()
 
 
@@ -279,16 +289,17 @@ def get_milestones(session: Session, project_id: int) -> list[Milestone]:
         select(Milestone).where(Milestone.project_id == project_id).order_by(Milestone.start_date.asc())
     ).all()
 
-def add_gantt_project(session: Session, name: str, color: str = "#818cf8", ctx: str = "default") -> GanttProject:
-    p = GanttProject(name=name, color=color, context=ctx)
+def add_gantt_project(session: Session, name: str, color: str = "#818cf8", ctx: str = "default", is_background: bool = False) -> GanttProject:
+    p = GanttProject(name=name, color=color, context=ctx, is_background=is_background)
     session.add(p); session.commit(); session.refresh(p)
     return p
 
-def edit_gantt_project(session: Session, project_id: int, name: Optional[str] = None, color: Optional[str] = None) -> Optional[GanttProject]:
+def edit_gantt_project(session: Session, project_id: int, name: Optional[str] = None, color: Optional[str] = None, is_background: Optional[bool] = None) -> Optional[GanttProject]:
     p = session.get(GanttProject, project_id)
     if not p: return None
     if name is not None: p.name = name
     if color is not None: p.color = color
+    if is_background is not None: p.is_background = is_background
     session.add(p); session.commit(); session.refresh(p)
     return p
 
@@ -334,6 +345,7 @@ def get_gantt_data(session: Session, ctx: str = "default") -> dict:
             "id": p.id,
             "name": p.name,
             "color": p.color,
+            "is_background": p.is_background,
             "milestones": [
                 {"id": m.id, "name": m.name, "start_date": str(m.start_date), "end_date": str(m.end_date)}
                 for m in milestones

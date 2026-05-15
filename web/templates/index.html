@@ -8,6 +8,7 @@
 <link rel="apple-touch-icon" href="/static/logo-180.png">
 <meta name="theme-color" content="#0d1033">
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -356,6 +357,9 @@
   .board-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; transition: border-color 0.15s; border-left: 3px solid transparent; position: relative; }
   .board-card:hover { border-color: var(--border-hover); }
   .board-card:hover .delete-btn { opacity: 1; }
+  .board-card-ghost { opacity: 0.35; background: var(--accent-dim); border: 1px dashed var(--accent); }
+  .board-card-chosen { box-shadow: 0 4px 16px rgba(0,0,0,0.3); transform: rotate(1deg); }
+  .board-card-drag { opacity: 0; }
   .board-card.priority-high { border-left-color: var(--red); }
   .board-card.priority-medium { border-left-color: var(--yellow); }
   .board-card.priority-low { border-left-color: var(--green); }
@@ -505,6 +509,9 @@
   .gantt-btn:hover { opacity: 0.85; }
   .gantt-btn-sm { background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); border-radius: 5px; padding: 3px 8px; font-size: 0.72rem; cursor: pointer; transition: all 0.15s; }
   .gantt-btn-sm:hover { border-color: var(--accent); color: var(--accent); }
+  .gantt-zoom-btn { background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); border-radius: 5px; padding: 3px 10px; font-size: 0.72rem; font-family: inherit; cursor: pointer; transition: all 0.15s; }
+  .gantt-zoom-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .gantt-zoom-btn.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); font-weight: 600; }
   /* Chart */
   .gantt-chart-area { flex: 1; overflow: auto; padding: 20px 24px; }
   .gantt-empty { color: var(--text-muted); font-size: 0.85rem; padding: 40px; text-align: center; line-height: 2; }
@@ -532,6 +539,52 @@
   .gantt-diamond.done    { background: var(--green); }
   .gantt-notes-row .gantt-row-label { font-size: 0.65rem; color: var(--text-dim); font-style: italic; }
   .gantt-notes-row .gantt-row-track { height: 24px; }
+
+  /* ── Voice input ─────────────────────────────────────── */
+  .mic-btn {
+    background: none; border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text-muted); cursor: pointer; padding: 4px 8px;
+    font-size: 15px; line-height: 1; transition: all 0.15s;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .mic-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .mic-btn.recording { border-color: var(--red); color: var(--red); animation: mic-pulse 1s infinite; }
+  @keyframes mic-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(248,113,113,0.4); }
+    50% { box-shadow: 0 0 0 6px rgba(248,113,113,0); }
+  }
+  .voice-modal { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 24px; min-width: 340px; max-width: 460px; width: 90vw; box-shadow: 0 12px 48px rgba(0,0,0,0.5); }
+  .voice-modal-title { font-size: 0.9rem; font-weight: 700; color: var(--text); margin-bottom: 18px; display: flex; align-items: center; gap: 8px; }
+  .voice-status { text-align: center; padding: 20px 0 10px; }
+  .voice-status-icon { font-size: 2.4rem; display: block; margin-bottom: 8px; }
+  .voice-status-label { font-size: 0.8rem; color: var(--text-muted); }
+  .voice-waveform { display: flex; align-items: center; justify-content: center; gap: 3px; height: 32px; margin: 8px 0; }
+  .voice-waveform span { display: inline-block; width: 3px; border-radius: 2px; background: var(--red); transform-origin: bottom; }
+  .voice-waveform.active span { animation: wave 0.8s ease-in-out infinite alternate; }
+  .voice-waveform span:nth-child(1) { animation-delay: 0s; height: 8px; }
+  .voice-waveform span:nth-child(2) { animation-delay: 0.1s; height: 16px; }
+  .voice-waveform span:nth-child(3) { animation-delay: 0.2s; height: 24px; }
+  .voice-waveform span:nth-child(4) { animation-delay: 0.3s; height: 18px; }
+  .voice-waveform span:nth-child(5) { animation-delay: 0.15s; height: 28px; }
+  .voice-waveform span:nth-child(6) { animation-delay: 0.25s; height: 14px; }
+  .voice-waveform span:nth-child(7) { animation-delay: 0.05s; height: 10px; }
+  @keyframes wave {
+    0% { transform: scaleY(0.4); }
+    100% { transform: scaleY(1); }
+  }
+  .voice-audio-wrap { margin: 12px 0; }
+  .voice-audio-wrap audio { width: 100%; border-radius: 6px; }
+  .voice-transcript { width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: inherit; font-size: 0.88rem; padding: 10px 12px; outline: none; resize: vertical; min-height: 72px; transition: border-color 0.15s; }
+  .voice-transcript:focus { border-color: var(--accent); }
+  .voice-actions { display: flex; gap: 8px; margin-top: 14px; justify-content: flex-end; }
+  .voice-btn { border: none; border-radius: 7px; padding: 7px 16px; font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: opacity 0.15s; }
+  .voice-btn-primary { background: var(--accent); color: #0d0f1a; }
+  .voice-btn-primary:hover { opacity: 0.85; }
+  .voice-btn-primary:disabled { opacity: 0.4; cursor: default; }
+  .voice-btn-secondary { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
+  .voice-btn-secondary:hover { color: var(--text); border-color: var(--border-hover); }
+  .voice-btn-danger { background: rgba(248,113,113,0.12); color: var(--red); border: 1px solid rgba(248,113,113,0.3); }
+  .voice-btn-danger:hover { background: rgba(248,113,113,0.2); }
 </style>
 </head>
 <body>
@@ -619,7 +672,10 @@
   <div class="main" id="main-area">
     <!-- Quick add -->
     <form class="add-form" id="add-form" autocomplete="off">
-      <textarea id="note-input" placeholder="Cosa stai facendo? (Invio per inviare, Shift+Invio per andare a capo)" rows="1"></textarea>
+      <div style="display:flex;align-items:flex-start;gap:8px;">
+        <textarea id="note-input" placeholder="Cosa stai facendo? (Invio per inviare, Shift+Invio per andare a capo)" rows="1" style="flex:1;"></textarea>
+        <button type="button" class="mic-btn" id="mic-btn" onclick="toggleVoiceRecording()" title="Registra nota vocale">🎙</button>
+      </div>
       <div class="add-form-footer">
         <input type="text" id="note-tag" placeholder="#tag" maxlength="60">
         <input type="text" id="note-project" placeholder="progetto" maxlength="60">
@@ -688,11 +744,21 @@
             <div class="gantt-panel-title">Nuovo progetto</div>
             <input class="gantt-input" id="gantt-proj-name" placeholder="Nome progetto" maxlength="60">
             <div class="gantt-colors" id="gantt-color-picker"></div>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;">
+              <input type="checkbox" id="gantt-proj-background" style="accent-color:var(--accent);">
+              Usa come sfondo <span style="opacity:0.6">(es. ferie)</span>
+            </label>
             <button class="gantt-btn" onclick="addGanttProject()">+ Aggiungi</button>
           </div>
         </div>
         <!-- Chart area -->
         <div class="gantt-chart-area">
+          <div style="display:flex;gap:4px;padding:8px 12px 0;justify-content:flex-end;">
+            <button onclick="setGanttZoom('day')" id="zoom-day" class="gantt-zoom-btn">Giorno</button>
+            <button onclick="setGanttZoom('week')" id="zoom-week" class="gantt-zoom-btn">Settimana</button>
+            <button onclick="setGanttZoom('month')" id="zoom-month" class="gantt-zoom-btn">Mese</button>
+            <button onclick="setGanttZoom('auto')" id="zoom-auto" class="gantt-zoom-btn active">Auto</button>
+          </div>
           <div id="gantt-chart"></div>
         </div>
       </div>
@@ -721,6 +787,7 @@
           </span>
         </label>
       </div>
+      <div id="schedule-last-run" style="display:none;margin-top:5px;font-size:0.72rem;"></div>
       <div id="schedule-config" style="display:none;margin-top:10px;">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
           <span style="font-size:0.75rem;color:var(--text-muted);min-width:44px;">Orario</span>
@@ -799,6 +866,57 @@
     <div id="confirm-buttons" style="display:flex;gap:8px;justify-content:flex-end;">
       <button onclick="closeConfirm()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text-muted);border-radius:6px;padding:6px 16px;font-family:inherit;font-size:0.82rem;cursor:pointer;">Annulla</button>
       <button id="confirm-ok" style="background:var(--red);border:none;color:#fff;border-radius:6px;padding:6px 16px;font-family:inherit;font-size:0.82rem;font-weight:600;cursor:pointer;">Elimina</button>
+    </div>
+  </div>
+</div>
+
+<!-- Voice modal -->
+<div class="modal-overlay" id="voice-modal" onclick="closeVoiceModal(event)">
+  <div class="voice-modal">
+    <div class="voice-modal-title">🎙 Nota vocale</div>
+
+    <!-- Step: recording -->
+    <div id="voice-step-recording">
+      <div class="voice-status">
+        <span class="voice-status-icon">🔴</span>
+        <div class="voice-waveform active" id="voice-waveform">
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <div class="voice-status-label">Registrazione in corso…</div>
+      </div>
+      <div class="voice-actions">
+        <button class="voice-btn voice-btn-secondary" onclick="closeVoiceModal()">Annulla</button>
+        <button class="voice-btn voice-btn-danger" onclick="stopVoiceRecording()">⏹ Ferma</button>
+      </div>
+    </div>
+
+    <!-- Step: review -->
+    <div id="voice-step-review" style="display:none;">
+      <div class="voice-audio-wrap">
+        <audio id="voice-playback" controls></audio>
+      </div>
+      <div class="voice-actions">
+        <button class="voice-btn voice-btn-secondary" onclick="closeVoiceModal()">Annulla</button>
+        <button class="voice-btn voice-btn-secondary" onclick="restartVoiceRecording()">↺ Riregistra</button>
+        <button class="voice-btn voice-btn-primary" id="voice-transcribe-btn" onclick="transcribeAudio()">✦ Trascrivi</button>
+      </div>
+    </div>
+
+    <!-- Step: transcript -->
+    <div id="voice-step-transcript" style="display:none;">
+      <textarea class="voice-transcript" id="voice-transcript-text" rows="4" placeholder="Trascrizione…"></textarea>
+      <div class="voice-actions">
+        <button class="voice-btn voice-btn-secondary" onclick="closeVoiceModal()">Annulla</button>
+        <button class="voice-btn voice-btn-primary" onclick="useVoiceTranscript()">Usa come nota</button>
+      </div>
+    </div>
+
+    <!-- Step: loading -->
+    <div id="voice-step-loading" style="display:none;">
+      <div class="voice-status">
+        <span class="voice-status-icon">⏳</span>
+        <div class="voice-status-label">Trascrizione in corso…</div>
+      </div>
     </div>
   </div>
 </div>
@@ -1698,8 +1816,25 @@ async function initSchedule() {
     });
     setScheduleType(data.type || 'daily');
     _setScheduleToggleUI(true);
+    _renderSchedulerStatus(data.last_run);
   } else {
     _setScheduleToggleUI(false);
+  }
+}
+
+function _renderSchedulerStatus(s) {
+  const el = document.getElementById('schedule-last-run');
+  if (!s || !s.ts) { el.style.display = 'none'; return; }
+  const dt = new Date(s.ts);
+  const isToday = dt.toDateString() === new Date().toDateString();
+  const label = isToday
+    ? `oggi ${dt.toLocaleTimeString('it-IT', {hour:'2-digit', minute:'2-digit'})}`
+    : dt.toLocaleDateString('it-IT', {day:'2-digit', month:'short'}) + ' ' + dt.toLocaleTimeString('it-IT', {hour:'2-digit', minute:'2-digit'});
+  el.style.display = 'block';
+  if (s.ok) {
+    el.innerHTML = `<span style="color:var(--green)">✓ Ultimo: ${label}</span>`;
+  } else {
+    el.innerHTML = `<span style="color:var(--red)" title="${escHtml(s.error || '')}">✗ Errore: ${label}</span>`;
   }
 }
 
@@ -1763,16 +1898,54 @@ function renderBoard(data) {
   container.innerHTML = COLS.map(col => {
     const notes = data[col.key] || [];
     return `
-    <div class="board-col">
+    <div class="board-col" data-status="${col.key}">
       <div class="board-col-header">
         <span class="board-col-title" style="color:${col.color}">${col.label}</span>
-        <span class="count-badge">${notes.length}</span>
+        <span class="count-badge" id="col-count-${col.key}">${notes.length}</span>
       </div>
-      <div class="board-col-body">
-        ${notes.length ? notes.map(n => boardCard(n, today)).join('') : '<div style="color:var(--text-dim);font-size:0.8rem;padding:8px 4px;text-align:center;">—</div>'}
+      <div class="board-col-body" data-status="${col.key}">
+        ${notes.length ? notes.map(n => boardCard(n, today)).join('') : ''}
       </div>
     </div>`;
   }).join('');
+  initSortable();
+}
+
+function initSortable() {
+  document.querySelectorAll('.board-col-body').forEach(colBody => {
+    Sortable.create(colBody, {
+      group: 'board',
+      animation: 150,
+      ghostClass: 'board-card-ghost',
+      chosenClass: 'board-card-chosen',
+      dragClass: 'board-card-drag',
+      onEnd: async function(evt) {
+        const noteId = parseInt(evt.item.dataset.id);
+        const toColBody = evt.to;
+        const toStatus = toColBody.dataset.status;
+        const columnIds = [...toColBody.querySelectorAll('.board-card[data-id]')]
+          .map(el => parseInt(el.dataset.id));
+
+        // Update badge counts
+        [evt.from, evt.to].forEach(col => {
+          const status = col.dataset.status;
+          const badge = document.getElementById(`col-count-${status}`);
+          if (badge) badge.textContent = col.querySelectorAll('.board-card[data-id]').length;
+        });
+
+        try {
+          await apiFetch(`/api/notes/${noteId}/move`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: toStatus, column_ids: columnIds }),
+          });
+        } catch(e) {
+          toast('Errore aggiornamento posizione', 'error');
+          loadBoard();
+        }
+      }
+    });
+  });
 }
 
 function boardCard(n, today) {
@@ -1873,7 +2046,9 @@ document.addEventListener('keydown', e => {
   const isEditing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || document.activeElement.contentEditable === 'true';
 
   if (e.key === 'Escape') {
-    if (document.getElementById('shortcuts-modal').classList.contains('show')) {
+    if (document.getElementById('voice-modal').classList.contains('show')) {
+      _closeVoiceModal();
+    } else if (document.getElementById('shortcuts-modal').classList.contains('show')) {
       closeShortcuts();
     } else if (isEditing) {
       document.activeElement.blur();
@@ -1938,6 +2113,14 @@ function goToNote(e, dateStr) {
 const GANTT_COLORS = ['#818cf8','#60a5fa','#34d399','#fbbf24','#f87171','#a78bfa','#fb923c','#2dd4bf','#f472b6','#a3e635'];
 let ganttSelectedColor = GANTT_COLORS[0];
 let ganttData = null;
+let ganttZoom = 'auto';
+
+function setGanttZoom(z) {
+  ganttZoom = z;
+  document.querySelectorAll('.gantt-zoom-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(`zoom-${z}`).classList.add('active');
+  if (ganttData) renderGanttChart(ganttData);
+}
 
 (function initColorPicker() {
   const picker = document.getElementById('gantt-color-picker');
@@ -1975,6 +2158,7 @@ function renderGanttPanel(data) {
       <div class="gantt-project-header">
         <div class="gantt-project-dot" style="background:${p.color}"></div>
         <span class="gantt-project-name">${escHtml(p.name)}</span>
+        ${p.is_background ? `<span style="font-size:0.62rem;background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:1px 5px;color:var(--text-muted);margin-left:2px;">sfondo</span>` : ''}
         <button class="gantt-project-del" onclick="deleteGanttProject(${p.id},event)" title="Elimina progetto">✕</button>
       </div>
       <div class="gantt-milestones-list">
@@ -2039,9 +2223,24 @@ function renderGanttChart(data) {
   }
 
   const todayStr = new Date().toISOString().slice(0,10);
+  const warnCutoff = new Date(Date.now() + 7 * 86400000).toISOString().slice(0,10);
+
+  // Compute at-risk milestones (end_date within 7 days + project has blocked/wip notes)
+  const atRiskList = [];
+  for (const p of data.projects) {
+    const hasBlocker = p.notes.some(n => ['blocked', 'waiting', 'backlog'].includes(n.status));
+    for (const m of p.milestones) {
+      m._atRisk = hasBlocker && m.end_date >= todayStr && m.end_date <= warnCutoff;
+      m._overdue = m.end_date < todayStr;
+      if (m._atRisk) atRiskList.push({ project: p.name, milestone: m.name, end: m.end_date });
+    }
+  }
 
   // Build scale header marks
-  const zoom = totalDays < 60 ? 'day' : totalDays < 180 ? 'week' : 'month';
+  const zoom = ganttZoom === 'auto'
+    ? (totalDays < 60 ? 'day' : totalDays < 180 ? 'week' : 'month')
+    : ganttZoom;
+  const oneDayPct = 1 / totalDays * 100;
   let scaleMarks = '';
   const cur = new Date(startD);
   while (cur <= endD) {
@@ -2067,13 +2266,23 @@ function renderGanttChart(data) {
   const todayLeft = pct(todayStr);
   const todayLine = `<div class="gantt-today-line" style="left:${todayLeft}%" title="Oggi"></div>`;
 
-  // Build rows
+  // Build background bands (ferie, etc.) — rendered as absolute overlays
+  const bgProjects = data.projects.filter(p => p.is_background && p.milestones.length);
+  let bgBandsHtml = bgProjects.flatMap(p => p.milestones.map(m => {
+    const left = pct(m.start_date);
+    const width = Math.max(parseFloat(pct(m.end_date)) - parseFloat(left), oneDayPct).toFixed(2);
+    const col = p.color;
+    return `<div style="position:absolute;top:0;bottom:0;left:${left}%;width:${width}%;background:${col};opacity:0.10;pointer-events:none;z-index:0;"></div>
+            <div style="position:absolute;top:2px;left:${left}%;width:${width}%;font-size:0.6rem;font-weight:700;color:${col};opacity:0.7;text-align:center;pointer-events:none;z-index:1;overflow:hidden;white-space:nowrap;">${escHtml(p.name)}: ${escHtml(m.name)}</div>`;
+  })).join('');
+
+  // Build rows (normal projects only)
   let rowsHtml = '';
   for (const p of data.projects) {
-    if (!p.milestones.length) continue;
+    if (p.is_background || !p.milestones.length) continue;
     // Project label row
     rowsHtml += `
-    <div class="gantt-row" style="margin-bottom:2px;margin-top:12px;">
+    <div class="gantt-row" style="margin-bottom:2px;margin-top:12px;position:relative;z-index:1;">
       <div class="gantt-row-label project">${escHtml(p.name)}</div>
       <div class="gantt-row-track" style="height:4px;"><div class="gantt-track-bg" style="opacity:0.3"></div>${todayLine}</div>
     </div>`;
@@ -2082,14 +2291,19 @@ function renderGanttChart(data) {
     for (const m of p.milestones) {
       const barLeft = pct(m.start_date);
       const barRight = pct(m.end_date);
-      const barWidth = (parseFloat(barRight) - parseFloat(barLeft)).toFixed(2);
+      const barWidth = Math.max(parseFloat(barRight) - parseFloat(barLeft), oneDayPct).toFixed(2);
+      const riskBadge = m._atRisk ? ' ⚠️' : '';
+      const riskStyle = m._atRisk
+        ? `outline: 2px solid var(--yellow); outline-offset: 1px;`
+        : m._overdue ? `opacity:0.6;` : '';
+      const labelStyle = m._atRisk ? 'color:var(--yellow);font-weight:600;' : '';
       rowsHtml += `
       <div class="gantt-row">
-        <div class="gantt-row-label" title="${escHtml(m.name)}">${escHtml(m.name)}</div>
+        <div class="gantt-row-label" title="${escHtml(m.name)}" style="${labelStyle}">${escHtml(m.name)}${riskBadge}</div>
         <div class="gantt-row-track">
           <div class="gantt-track-bg"></div>
           ${todayLine}
-          <div class="gantt-bar" style="left:${barLeft}%;width:${barWidth}%;background:${p.color}" title="${m.start_date} → ${m.end_date}">${escHtml(m.name)}</div>
+          <div class="gantt-bar" style="left:${barLeft}%;width:${barWidth}%;background:${p.color};${riskStyle}" title="${m.start_date} → ${m.end_date}">${escHtml(m.name)}${riskBadge}</div>
         </div>
       </div>`;
     }
@@ -2114,13 +2328,22 @@ function renderGanttChart(data) {
     }
   }
 
-  chart.innerHTML = `
+  const warningPanel = atRiskList.length ? `
+  <div style="background:rgba(234,179,8,0.08);border:1px solid var(--yellow);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:0.78rem;">
+    <div style="font-weight:700;color:var(--yellow);margin-bottom:6px;">⚠️ ${atRiskList.length} milestone a rischio</div>
+    ${atRiskList.map(r => `<div style="color:var(--text-muted);margin-bottom:2px;">· <strong style="color:var(--text)">${escHtml(r.project)}</strong> — ${escHtml(r.milestone)} <span style="color:var(--red)">(scade ${r.end})</span></div>`).join('')}
+  </div>` : '';
+
+  chart.innerHTML = warningPanel + `
   <div class="gantt-container">
     <div class="gantt-header-row">
       <div class="gantt-label-col"></div>
       <div class="gantt-scale" style="position:relative;height:20px;">${scaleMarks}</div>
     </div>
-    <div class="gantt-body">${rowsHtml}</div>
+    <div class="gantt-body" style="position:relative;">
+      ${bgBandsHtml}
+      ${rowsHtml}
+    </div>
   </div>`;
 }
 
@@ -2135,13 +2358,15 @@ function getWeekNumber(d) {
 async function addGanttProject() {
   const name = normalizeProject(document.getElementById('gantt-proj-name').value);
   if (!name) return;
+  const is_background = document.getElementById('gantt-proj-background').checked;
   try {
     await apiFetch('/api/gantt/projects', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({name, color: ganttSelectedColor}),
+      body: JSON.stringify({name, color: ganttSelectedColor, is_background}),
     });
     document.getElementById('gantt-proj-name').value = '';
+    document.getElementById('gantt-proj-background').checked = false;
     toast('Progetto aggiunto', 'success');
     await loadGantt();
   } catch { toast('Errore', 'error'); }
@@ -2164,7 +2389,7 @@ async function addMilestone(e, projectId) {
   const end = form.end.value;
   if (!name || !start || !end) return;
   try {
-    await fetch('/api/gantt/milestones', {
+    await apiFetch('/api/gantt/milestones', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({project_id: projectId, name, start_date: start, end_date: end}),
@@ -2188,6 +2413,115 @@ async function deleteMilestone(id, e) {
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadNotes();
 resetRefresh();
+
+// ── Voice input ───────────────────────────────────────────────────────────────
+let _mediaRecorder = null;
+let _audioChunks = [];
+let _audioBlob = null;
+
+function toggleVoiceRecording() {
+  if (_mediaRecorder && _mediaRecorder.state === 'recording') {
+    stopVoiceRecording();
+  } else {
+    startVoiceRecording();
+  }
+}
+
+async function startVoiceRecording() {
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      toast('Il microfono richiede HTTPS. Esegui: noted setup-https — poi riavvia.', 'error');
+      return;
+    }
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
+    _mediaRecorder = new MediaRecorder(stream, { mimeType });
+    _audioChunks = [];
+    _mediaRecorder.ondataavailable = e => { if (e.data.size > 0) _audioChunks.push(e.data); };
+    _mediaRecorder.onstop = () => {
+      stream.getTracks().forEach(t => t.stop());
+      _audioBlob = new Blob(_audioChunks, { type: mimeType });
+      const url = URL.createObjectURL(_audioBlob);
+      document.getElementById('voice-playback').src = url;
+      _showVoiceStep('review');
+    };
+    _mediaRecorder.start(100);
+    document.getElementById('mic-btn').classList.add('recording');
+    _showVoiceModal();
+    _showVoiceStep('recording');
+  } catch (err) {
+    toast('Microfono non disponibile: ' + err.message, 'error');
+  }
+}
+
+function stopVoiceRecording() {
+  if (_mediaRecorder && _mediaRecorder.state !== 'inactive') {
+    _mediaRecorder.stop();
+    document.getElementById('mic-btn').classList.remove('recording');
+  }
+}
+
+function restartVoiceRecording() {
+  _audioBlob = null;
+  _audioChunks = [];
+  const pb = document.getElementById('voice-playback');
+  pb.src = '';
+  startVoiceRecording();
+}
+
+async function transcribeAudio() {
+  if (!_audioBlob) return;
+  _showVoiceStep('loading');
+  try {
+    const form = new FormData();
+    form.append('audio', _audioBlob, 'recording.webm');
+    const res = await fetch('/api/voice/transcribe', { method: 'POST', body: form });
+    let data;
+    try { data = await res.json(); } catch { data = {}; }
+    if (!res.ok) throw new Error(data.detail || 'Errore trascrizione');
+    document.getElementById('voice-transcript-text').value = data.text || '';
+    _showVoiceStep('transcript');
+  } catch (err) {
+    toast('Trascrizione fallita: ' + err.message, 'error');
+    _showVoiceStep('review');
+  }
+}
+
+function useVoiceTranscript() {
+  const text = document.getElementById('voice-transcript-text').value.trim();
+  if (text) {
+    const ta = document.getElementById('note-input');
+    ta.value = text;
+    ta.style.height = 'auto';
+    ta.style.height = ta.scrollHeight + 'px';
+    ta.focus();
+  }
+  _closeVoiceModal();
+}
+
+function _showVoiceModal() {
+  document.getElementById('voice-modal').classList.add('show');
+}
+
+function _showVoiceStep(step) {
+  ['recording', 'review', 'transcript', 'loading'].forEach(s => {
+    document.getElementById(`voice-step-${s}`).style.display = s === step ? '' : 'none';
+  });
+}
+
+function _closeVoiceModal() {
+  stopVoiceRecording();
+  document.getElementById('voice-modal').classList.remove('show');
+  document.getElementById('mic-btn').classList.remove('recording');
+}
+
+function closeVoiceModal(e) {
+  if (!e || e.target === document.getElementById('voice-modal')) {
+    _closeVoiceModal();
+  }
+}
 </script>
 </body>
 </html>
