@@ -136,7 +136,7 @@ async def api_board(
 ):
     with get_session() as session:
         notes = crud.get_board_notes(session, project=project or None, assignee=assignee or None)
-    result = {"todo": [], "wip": [], "blocked": [], "done": []}
+    result = {"backlog": [], "todo": [], "wip": [], "waiting": [], "blocked": [], "done": []}
     for n in notes:
         key = n.status if n.status in result else None
         if key:
@@ -152,8 +152,9 @@ async def api_focus():
         due_notes = crud.get_due_notes(session)
     wip = [_note_dict(n) for n in board_notes if n.status == "wip"]
     blocked = [_note_dict(n) for n in board_notes if n.status == "blocked"]
+    waiting = [_note_dict(n) for n in board_notes if n.status == "waiting"]
     due_today = [_note_dict(n) for n in due_notes if n.due_date == today]
-    return {"wip": wip, "blocked": blocked, "due_today": due_today}
+    return {"wip": wip, "blocked": blocked, "waiting": waiting, "due_today": due_today}
 
 
 @app.post("/api/recap")

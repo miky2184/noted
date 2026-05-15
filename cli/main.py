@@ -45,8 +45,8 @@ def _init():
 # ── ADD ────────────────────────────────────────────────────────────────────────
 
 PRIORITY_COLORS = {"high": "red", "medium": "yellow", "low": "green"}
-STATUS_ICONS = {"todo": "⬜", "wip": "🔄", "done": "✅", "blocked": "🚫"}
-STATUS_COLORS = {"todo": "blue", "wip": "yellow", "done": "green", "blocked": "red"}
+STATUS_ICONS = {"backlog": "🗂", "todo": "⬜", "wip": "🔄", "waiting": "⏳", "blocked": "🚫", "done": "✅"}
+STATUS_COLORS = {"backlog": "dim", "todo": "blue", "wip": "yellow", "waiting": "magenta", "blocked": "red", "done": "green"}
 
 @app.command()
 def add(
@@ -55,7 +55,7 @@ def add(
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Progetto: 'finops', 'deutsche-bank'"),
     priority: str = typer.Option("medium", "--priority", "-P", help="Priorità: low | medium | high"),
     due: Optional[str] = typer.Option(None, "--due", "-d", help="Scadenza: YYYY-MM-DD"),
-    status: Optional[str] = typer.Option(None, "--status", "-s", help="Stato: todo | wip | done | blocked"),
+    status: Optional[str] = typer.Option(None, "--status", "-s", help="Stato: backlog | todo | wip | waiting | blocked | done"),
     assignee: Optional[str] = typer.Option(None, "--assignee", "-a", help="Assegna a: 'mario' o '@mario'"),
 ):
     """Aggiungi una nota."""
@@ -70,8 +70,8 @@ def add(
     if priority not in ("low", "medium", "high"):
         console.print("[red]Priorità non valida. Usa: low | medium | high[/red]")
         raise typer.Exit(1)
-    if status and status not in ("todo", "wip", "done", "blocked"):
-        console.print("[red]Stato non valido. Usa: todo | wip | done | blocked[/red]")
+    if status and status not in ("backlog", "todo", "wip", "waiting", "blocked", "done"):
+        console.print("[red]Stato non valido. Usa: backlog | todo | wip | waiting | blocked | done[/red]")
         raise typer.Exit(1)
     # Strip leading @ from assignee if present
     if assignee:
@@ -178,7 +178,7 @@ def edit(
     priority: Optional[str] = typer.Option(None, "--priority", "-P", help="Nuova priorità: low | medium | high"),
     due: Optional[str] = typer.Option(None, "--due", "-d", help="Nuova scadenza: YYYY-MM-DD"),
     clear_due: bool = typer.Option(False, "--clear-due", help="Rimuovi la scadenza"),
-    status: Optional[str] = typer.Option(None, "--status", "-s", help="Stato: todo | wip | done | blocked"),
+    status: Optional[str] = typer.Option(None, "--status", "-s", help="Stato: backlog | todo | wip | waiting | blocked | done"),
     clear_status: bool = typer.Option(False, "--clear-status", help="Rimuovi lo stato"),
     assignee: Optional[str] = typer.Option(None, "--assignee", "-a", help="Assegna a: 'mario' o '@mario'"),
 ):
@@ -187,8 +187,8 @@ def edit(
     if priority and priority not in ("low", "medium", "high"):
         console.print("[red]Priorità non valida. Usa: low | medium | high[/red]")
         raise typer.Exit(1)
-    if status and status not in ("todo", "wip", "done", "blocked"):
-        console.print("[red]Stato non valido. Usa: todo | wip | done | blocked[/red]")
+    if status and status not in ("backlog", "todo", "wip", "waiting", "blocked", "done"):
+        console.print("[red]Stato non valido. Usa: backlog | todo | wip | waiting | blocked | done[/red]")
         raise typer.Exit(1)
     due_date = None
     if due:

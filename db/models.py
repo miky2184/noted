@@ -5,7 +5,7 @@ import json
 
 
 PRIORITIES = ("low", "medium", "high")
-STATUSES = ("todo", "wip", "done", "blocked")
+STATUSES = ("backlog", "todo", "wip", "waiting", "blocked", "done")
 
 class Note(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -14,7 +14,7 @@ class Note(SQLModel, table=True):
     project: Optional[str] = None
     priority: str = Field(default="medium")
     due_date: Optional[date] = None
-    status: Optional[str] = None   # todo | wip | done | blocked
+    status: Optional[str] = None   # backlog | todo | wip | waiting | blocked | done
     assignee: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)

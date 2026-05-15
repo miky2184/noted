@@ -198,10 +198,12 @@
 
   /* ── Status ──────────────────────────────────────────── */
   .status { font-size: 0.68rem; font-weight: 600; padding: 1px 6px; border-radius: 8px; }
+  .status-backlog { background: rgba(100,116,139,0.15); color: #94a3b8; }
   .status-todo    { background: rgba(96,165,250,0.12); color: var(--blue); }
   .status-wip     { background: rgba(251,191,36,0.12); color: var(--yellow); }
-  .status-done    { background: rgba(52,211,153,0.12); color: var(--green); }
+  .status-waiting { background: rgba(167,139,250,0.15); color: #a78bfa; }
   .status-blocked { background: rgba(248,113,113,0.15); color: var(--red); }
+  .status-done    { background: rgba(52,211,153,0.12); color: var(--green); }
 
   /* ── Due date ────────────────────────────────────────── */
   .due-date { font-size: 0.68rem; color: var(--text-muted); display: flex; align-items: center; gap: 3px; }
@@ -344,7 +346,7 @@
   .board-filter-input { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-family: inherit; font-size: 0.8rem; padding: 5px 10px; outline: none; width: 160px; transition: border-color 0.15s; }
   .board-filter-input:focus { border-color: var(--accent); }
   .board-filter-input::placeholder { color: var(--text-dim); }
-  .board-container { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; align-items: start; }
+  .board-container { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; align-items: start; }
   .board-col { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); display: flex; flex-direction: column; max-height: calc(100vh - 200px); }
   .board-col-header { padding: 10px 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
   .board-col-title { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
@@ -427,10 +429,12 @@
         <input type="date" id="note-due" title="Scadenza" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-family:inherit;font-size:0.78rem;padding:4px 8px;outline:none;width:130px;transition:border-color 0.15s;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
         <select id="note-status" title="Stato" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-family:inherit;font-size:0.78rem;padding:4px 8px;outline:none;cursor:pointer;">
           <option value="">— stato</option>
+          <option value="backlog">🗂 backlog</option>
           <option value="todo">⬜ todo</option>
           <option value="wip">🔄 wip</option>
-          <option value="done">✅ done</option>
+          <option value="waiting">⏳ waiting</option>
           <option value="blocked">🚫 blocked</option>
+          <option value="done">✅ done</option>
         </select>
         <select id="note-priority" title="Priorità" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-family:inherit;font-size:0.78rem;padding:4px 8px;outline:none;cursor:pointer;">
           <option value="low">▼ low</option>
@@ -608,7 +612,7 @@ function toast(msg, type = '') {
 }
 
 // ── Due notes ─────────────────────────────────────────────────────────────────
-const STATUS_LABEL = { todo: '⬜ todo', wip: '🔄 wip', done: '✅ done', blocked: '🚫 blocked' };
+const STATUS_LABEL = { backlog: '🗂 backlog', todo: '⬜ todo', wip: '🔄 wip', waiting: '⏳ waiting', blocked: '🚫 blocked', done: '✅ done' };
 
 async function loadDueNotes() {
   try {
@@ -857,7 +861,7 @@ async function deleteNote(id) {
 }
 
 // ── Inline edit ──────────────────────────────────────────────────────────────
-const STATUS_CYCLE = [null, 'todo', 'wip', 'done', 'blocked'];
+const STATUS_CYCLE = [null, 'backlog', 'todo', 'wip', 'waiting', 'blocked', 'done'];
 
 function startEdit(el, noteId) {
   if (el.contentEditable === 'true') return;
@@ -1075,10 +1079,12 @@ function renderBoard(data) {
   const container = document.getElementById('board-container');
   const today = new Date().toISOString().slice(0,10);
   const COLS = [
-    { key: 'todo',    label: '⬜ Todo',      color: 'var(--blue)' },
-    { key: 'wip',     label: '🔄 In corso',  color: 'var(--yellow)' },
-    { key: 'blocked', label: '🚫 Bloccati',  color: 'var(--red)' },
-    { key: 'done',    label: '✅ Done',       color: 'var(--green)' },
+    { key: 'backlog',  label: '🗂 Backlog',   color: '#64748b' },
+    { key: 'todo',     label: '⬜ Todo',      color: 'var(--blue)' },
+    { key: 'wip',      label: '🔄 In corso',  color: 'var(--yellow)' },
+    { key: 'waiting',  label: '⏳ Waiting',   color: '#a78bfa' },
+    { key: 'blocked',  label: '🚫 Bloccati',  color: 'var(--red)' },
+    { key: 'done',     label: '✅ Done',      color: 'var(--green)' },
   ];
   container.innerHTML = COLS.map(col => {
     const notes = data[col.key] || [];
@@ -1134,6 +1140,7 @@ function renderFocus(data) {
 
   const counts = [];
   if (data.blocked.length) counts.push(`🚫 ${data.blocked.length}`);
+  if (data.waiting.length) counts.push(`⏳ ${data.waiting.length}`);
   if (data.wip.length) counts.push(`🔄 ${data.wip.length}`);
   if (data.due_today.length) counts.push(`🔴 ${data.due_today.length}`);
   document.getElementById('focus-counts').textContent = counts.join('  ');
@@ -1141,6 +1148,9 @@ function renderFocus(data) {
   let html = '';
   if (data.blocked.length) {
     html += `<div><div class="focus-group-label" style="color:var(--red)">🚫 Bloccati</div>${data.blocked.map(n => focusCard(n,'blocked')).join('')}</div>`;
+  }
+  if (data.waiting.length) {
+    html += `<div><div class="focus-group-label" style="color:#a78bfa">⏳ In attesa</div>${data.waiting.map(n => focusCard(n,'waiting')).join('')}</div>`;
   }
   if (data.wip.length) {
     html += `<div><div class="focus-group-label" style="color:var(--yellow)">🔄 In corso</div>${data.wip.map(n => focusCard(n,'wip')).join('')}</div>`;
