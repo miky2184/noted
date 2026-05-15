@@ -124,22 +124,34 @@ Timeline visiva per pianificare progetti:
 
 ### Recap AI
 
-- **🤖 Daily** — recap strutturato delle note di oggi, tiene conto delle milestone Gantt attive per contestualizzare rischi e ritardi
+- **🤖 Daily** — recap strutturato delle note di oggi; include le milestone Gantt attive per contestualizzare avanzamento e rischi di ritardo
 - **📅 Weekly** — resume delle note degli ultimi 7 giorni con le milestone in corso
-- Salvataggio automatico al termine della generazione
-- Lista "Ultimi recap" nella sidebar: click su un recap per visualizzarlo, orario visibile per distinguere più recap dello stesso giorno
+- Salvataggio automatico al termine di ogni generazione
+- Lista "Ultimi recap" nella sidebar aggiornata dinamicamente dopo ogni generazione
+- Click su un recap → caricato nella box senza ricaricare la pagina; orario visibile per distinguere più recap dello stesso giorno
 - Selezione modello AI: ⚡ Haiku 4.5 · ✦ Sonnet 4.6 · ◆ Opus 4.7
 
-### Backup
+### Backup e Ripristino
 
-Il bottone `⬇` in alto a destra offre due formati:
+Il bottone `⬇` in alto a destra apre un menu con le opzioni di export e import.
 
-| Formato | Uso |
-|---------|-----|
-| `SQLite (.db)` | Backup completo ripristinabile — copia il file e sostituiscilo in caso di necessità |
+**Esporta**
+
+| Formato | Contenuto |
+|---------|-----------|
+| `SQLite (.db)` | Copia binaria del database completo — tutti i contesti, ripristinabile direttamente |
 | `JSON (.json)` | Export leggibile di tutti i dati (note, recap, Gantt, contesti) — utile per migrazioni o analisi esterne |
 
 I file vengono nominati `noted_backup_YYYY-MM-DD.db / .json`.
+
+**Importa**
+
+| Formato | Comportamento |
+|---------|---------------|
+| `SQLite (.db)` | Sostituisce il database corrente con il file caricato |
+| `JSON (.json)` | Cancella tutti i dati esistenti e reinserisce quelli dal file |
+
+⚠️ L'import è irreversibile — viene richiesta conferma esplicita prima di procedere. Si consiglia di eseguire un export prima di importare.
 
 ### Scorciatoie da tastiera
 

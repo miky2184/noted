@@ -10,7 +10,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from db.engine import init_db, get_session
+from db.engine import init_db, get_session, engine
 from db import crud
 
 app = FastAPI(title="noted dashboard")
@@ -88,7 +88,7 @@ async def index(request: Request, tag: str = "", project: str = ""):
         notes = crud.get_notes(session, day=date.today(), tag=tag or None,
                                project=project or None, ctx=ctx, limit=50)
         recap = crud.get_recap(session, day=date.today(), ctx=ctx)
-        recent_recaps = crud.get_recent_recaps(session, days=7, ctx=ctx)
+        recent_recaps = crud.get_recent_recaps(session, ctx=ctx)
 
     return templates.TemplateResponse(request, "index.html", {
         "notes": notes,
@@ -384,11 +384,88 @@ async def api_delete_recap(recap_id: int):
 
 @app.get("/api/backup/db")
 async def api_backup_db():
-    from fastapi.responses import FileResponse
-    db_path = str(engine.url).replace("sqlite:///", "")
-    filename = f"noted_backup_{date.today().isoformat()}.db"
-    return FileResponse(db_path, media_type="application/octet-stream",
-                        filename=filename)
+    import base64
+    from db.paths import db_path as get_db_path
+    path = get_db_path()
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Database non trovato: {path}")
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return {
+        "filename": f"noted_backup_{date.today().isoformat()}.db",
+        "encoding": "base64",
+        "data": encoded,
+    }
+
+@app.post("/api/restore/db")
+async def api_restore_db(request: Request):
+    from db.paths import db_path as get_db_path
+    body = await request.body()
+    if not body.startswith(b"SQLite format 3"):
+        raise HTTPException(status_code=400, detail="File non valido: non è un database SQLite")
+    path = get_db_path()
+    engine.dispose()
+    path.write_bytes(body)
+    init_db()
+    return {"ok": True}
+
+
+@app.post("/api/restore/json")
+async def api_restore_json(request: Request):
+    from db.models import Note, Recap, GanttProject, Milestone, Context
+    from sqlmodel import delete as sql_delete
+    from datetime import datetime
+
+    body = await request.json()
+    if "notes" not in body:
+        raise HTTPException(status_code=400, detail="JSON non valido")
+
+    with get_session() as session:
+        session.exec(sql_delete(Milestone))
+        session.exec(sql_delete(GanttProject))
+        session.exec(sql_delete(Recap))
+        session.exec(sql_delete(Note))
+        session.exec(sql_delete(Context))
+
+        for c in body.get("contexts", []):
+            session.add(Context(id=c["id"], name=c["name"]))
+
+        for n in body.get("notes", []):
+            session.add(Note(
+                id=n["id"], content=n["content"], tags=n.get("tags", ""),
+                project=n.get("project"), priority=n.get("priority", "medium"),
+                due_date=date.fromisoformat(n["due_date"]) if n.get("due_date") else None,
+                status=n.get("status"), assignee=n.get("assignee"),
+                context=n.get("context", "default"),
+                created_at=datetime.fromisoformat(n["created_at"]),
+                updated_at=datetime.fromisoformat(n.get("updated_at", n["created_at"])),
+            ))
+
+        for r in body.get("recaps", []):
+            session.add(Recap(
+                id=r["id"], recap_date=date.fromisoformat(r["recap_date"]),
+                summary=r["summary"], notes_count=r.get("notes_count", 0),
+                context=r.get("context", "default"),
+                created_at=datetime.fromisoformat(r["created_at"]),
+            ))
+
+        for p in body.get("gantt_projects", []):
+            session.add(GanttProject(
+                id=p["id"], name=p["name"], color=p.get("color", "#818cf8"),
+                context=p.get("context", "default"),
+                created_at=datetime.fromisoformat(p["created_at"]),
+            ))
+
+        for m in body.get("milestones", []):
+            session.add(Milestone(
+                id=m["id"], project_id=m["project_id"], name=m["name"],
+                start_date=date.fromisoformat(m["start_date"]),
+                end_date=date.fromisoformat(m["end_date"]),
+            ))
+
+        session.commit()
+
+    return {"ok": True}
+
 
 @app.get("/api/backup/json")
 async def api_backup_json():

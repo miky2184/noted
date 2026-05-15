@@ -252,11 +252,12 @@ def delete_recap(session: Session, recap_id: int) -> bool:
     return True
 
 
-def get_recent_recaps(session: Session, days: int = 7, ctx: str = "default") -> list[Recap]:
+def get_recent_recaps(session: Session, days: int = 90, ctx: str = "default") -> list[Recap]:
     since = date.today() - timedelta(days=days)
     stmt = (select(Recap)
             .where(Recap.recap_date >= since, Recap.context == ctx)
-            .order_by(Recap.recap_date.desc()))
+            .order_by(Recap.recap_date.desc(), Recap.created_at.desc())
+            .limit(50))
     return session.exec(stmt).all()
 
 

@@ -581,12 +581,23 @@
   <div style="position:relative;" id="backup-wrapper">
     <button class="theme-btn" id="backup-btn" onclick="toggleBackupMenu()" title="Backup database">⬇</button>
     <div id="backup-menu" style="display:none;position:absolute;top:calc(100% + 6px);right:0;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:6px;min-width:170px;box-shadow:0 8px 30px rgba(0,0,0,0.3);z-index:200;">
-      <a href="/api/backup/db" download class="backup-menu-item">
+      <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-dim);padding:4px 10px 2px;">Esporta</div>
+      <button onclick="downloadBackup('db')" class="backup-menu-item" style="width:100%;text-align:left;border:none;cursor:pointer;background:none;">
         <span>🗄</span><span>SQLite <span style="opacity:0.5;font-size:0.72rem">(.db)</span></span>
-      </a>
-      <a href="/api/backup/json" download class="backup-menu-item">
+      </button>
+      <button onclick="downloadBackup('json')" class="backup-menu-item" style="width:100%;text-align:left;border:none;cursor:pointer;background:none;">
         <span>📄</span><span>JSON <span style="opacity:0.5;font-size:0.72rem">(.json)</span></span>
-      </a>
+      </button>
+      <div style="border-top:1px solid var(--border);margin:5px 0;"></div>
+      <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-dim);padding:4px 10px 2px;">Importa</div>
+      <button onclick="triggerImport('db')" class="backup-menu-item" style="width:100%;text-align:left;border:none;cursor:pointer;background:none;">
+        <span>📥</span><span>SQLite <span style="opacity:0.5;font-size:0.72rem">(.db)</span></span>
+      </button>
+      <button onclick="triggerImport('json')" class="backup-menu-item" style="width:100%;text-align:left;border:none;cursor:pointer;background:none;">
+        <span>📥</span><span>JSON <span style="opacity:0.5;font-size:0.72rem">(.json)</span></span>
+      </button>
+      <input type="file" id="import-db-input" accept=".db" style="display:none" onchange="handleImport(this,'db')">
+      <input type="file" id="import-json-input" accept=".json" style="display:none" onchange="handleImport(this,'json')">
     </div>
   </div>
 
@@ -734,7 +745,7 @@
   <div class="modal" style="max-width:340px;">
     <div class="modal-title" id="confirm-title"></div>
     <div id="confirm-body" style="font-size:0.82rem;color:var(--text-muted);line-height:1.6;margin-bottom:18px;"></div>
-    <div style="display:flex;gap:8px;justify-content:flex-end;">
+    <div id="confirm-buttons" style="display:flex;gap:8px;justify-content:flex-end;">
       <button onclick="closeConfirm()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text-muted);border-radius:6px;padding:6px 16px;font-family:inherit;font-size:0.82rem;cursor:pointer;">Annulla</button>
       <button id="confirm-ok" style="background:var(--red);border:none;color:#fff;border-radius:6px;padding:6px 16px;font-family:inherit;font-size:0.82rem;font-weight:600;cursor:pointer;">Elimina</button>
     </div>
@@ -770,6 +781,93 @@ function apiFetch(url, opts = {}) {
 }
 
 // ── Context switcher ──────────────────────────────────────────────────────────
+async function downloadBackup(format) {
+  document.getElementById('backup-menu').style.display = 'none';
+  try {
+    const res = await fetch(`/api/backup/${format}`);
+    if (!res.ok) throw new Error((await res.json()).detail || 'Errore');
+
+    let blob, filename;
+    if (format === 'db') {
+      const { data, filename: fn } = await res.json();
+      // decode base64 → binary → Blob (bypassa il blocco HTTP su file binari)
+      const binary = atob(data);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      blob = new Blob([bytes], { type: 'application/octet-stream' });
+      filename = fn;
+    } else {
+      blob = await res.blob();
+      filename = `noted_backup_${new Date().toISOString().slice(0,10)}.${format}`;
+    }
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast(`Backup ${format.toUpperCase()} scaricato`, 'success');
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function triggerImport(format) {
+  document.getElementById('backup-menu').style.display = 'none';
+  document.getElementById(`import-${format}-input`).value = '';
+  document.getElementById(`import-${format}-input`).click();
+}
+
+async function handleImport(input, format) {
+  const file = input.files[0];
+  if (!file) return;
+
+  const ok = await showConfirm(
+    'Importa backup',
+    `Stai per sostituire <strong>tutti i dati attuali</strong> con il backup:<br>
+     <code style="font-size:0.8rem;background:var(--surface2);padding:2px 6px;border-radius:4px">${escHtml(file.name)}</code><br><br>
+     Questa operazione è <strong>irreversibile</strong>. Esegui prima un export se vuoi conservare i dati attuali.`,
+    'Importa e sostituisci'
+  );
+  if (!ok) return;
+
+  const loading = showImportLoading();
+  try {
+    loading.progress(20, 'Lettura file…');
+    let body, contentType;
+    if (format === 'db') {
+      body = await file.arrayBuffer();
+      contentType = 'application/octet-stream';
+    } else {
+      body = await file.text();
+      contentType = 'application/json';
+    }
+
+    loading.progress(55, 'Invio al server…');
+    const res = await fetch(`/api/restore/${format}`, {
+      method: 'POST',
+      headers: { 'Content-Type': contentType },
+      body,
+    });
+
+    loading.progress(90, 'Finalizzazione…');
+    if (!res.ok) {
+      let msg = 'Errore server';
+      try { msg = (await res.json()).detail || msg; } catch(_) {}
+      throw new Error(msg);
+    }
+
+    loading.progress(100);
+    await new Promise(r => setTimeout(r, 300));
+    loading.success();
+    setTimeout(() => { window.location.href = `/?ctx=${encodeURIComponent(activeCtx)}`; }, 2000);
+  } catch(e) {
+    loading.close();
+    toast(e.message, 'error');
+  }
+}
+
 function toggleBackupMenu() {
   const menu = document.getElementById('backup-menu');
   menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
@@ -902,8 +1000,8 @@ async function deleteContext(e, ctxId, name) {
   _refreshStars();
   const urlCtx = new URLSearchParams(window.location.search).get('ctx');
   if (!urlCtx) {
-    const fav = localStorage.getItem('noted-favorite-ctx');
-    if (fav && fav !== activeCtx) {
+    const fav = localStorage.getItem('noted-favorite-ctx') || activeCtx;
+    if (fav && fav !== 'default') {
       window.location.href = `/?ctx=${encodeURIComponent(fav)}`;
     }
   }
@@ -1421,6 +1519,39 @@ async function _streamToRecapBox(url, doneLabel) {
   }
 }
 
+// ── Import loading modal ──────────────────────────────────────────────────────
+function showImportLoading() {
+  document.getElementById('confirm-title').textContent = 'Importazione in corso…';
+  document.getElementById('confirm-body').innerHTML = `
+    <div style="margin:12px 0 4px;">
+      <div style="background:var(--surface2);border-radius:100px;height:6px;overflow:hidden;">
+        <div id="import-progress-bar" style="height:100%;width:0%;background:var(--accent);border-radius:100px;transition:width 0.4s ease;"></div>
+      </div>
+    </div>
+    <div id="import-status" style="font-size:0.78rem;color:var(--text-muted);margin-top:8px;">Caricamento file…</div>`;
+  document.getElementById('confirm-buttons').style.display = 'none';
+  document.getElementById('confirm-modal').classList.add('show');
+  return {
+    progress(pct, label) {
+      document.getElementById('import-progress-bar').style.width = pct + '%';
+      if (label) document.getElementById('import-status').textContent = label;
+    },
+    success() {
+      document.getElementById('confirm-title').textContent = 'Operazione riuscita';
+      document.getElementById('confirm-body').innerHTML = `
+        <div style="text-align:center;padding:8px 0;">
+          <div style="font-size:2rem;margin-bottom:8px;">✅</div>
+          <div style="color:var(--green);font-weight:600;">Database importato correttamente.</div>
+          <div style="color:var(--text-muted);font-size:0.78rem;margin-top:6px;">Ricarico l\'app…</div>
+        </div>`;
+    },
+    close() {
+      document.getElementById('confirm-modal').classList.remove('show');
+      document.getElementById('confirm-buttons').style.display = '';
+    }
+  };
+}
+
 async function refreshRecentRecaps() {
   try {
     const res = await apiFetch('/api/recaps/recent');
@@ -1658,7 +1789,11 @@ function showConfirm(title, body, confirmLabel = 'Elimina') {
   document.getElementById('confirm-modal').classList.add('show');
   return new Promise(resolve => {
     _confirmResolve = resolve;
-    document.getElementById('confirm-ok').onclick = () => { closeConfirm(); resolve(true); };
+    document.getElementById('confirm-ok').onclick = () => {
+      document.getElementById('confirm-modal').classList.remove('show');
+      _confirmResolve = null;
+      resolve(true);
+    };
   });
 }
 
