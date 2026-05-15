@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta
 from typing import Optional
 from sqlmodel import Session, select
+from sqlalchemy import or_
 from db.models import Note, Recap, GanttProject, Milestone, Context
 
 
@@ -83,7 +84,12 @@ def get_notes(
         stmt = stmt.where(Note.created_at >= start, Note.created_at <= end)
 
     if tag:
-        stmt = stmt.where(Note.tags.ilike(f"%{tag}%"))
+        stmt = stmt.where(or_(
+            Note.tags == tag,
+            Note.tags.ilike(f"{tag},%"),
+            Note.tags.ilike(f"%,{tag}"),
+            Note.tags.ilike(f"%,{tag},%"),
+        ))
     if project:
         stmt = stmt.where(Note.project.ilike(project))
     if priority:

@@ -2,10 +2,12 @@ from fastapi import FastAPI, Request, Query, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
+from contextlib import asynccontextmanager
 from pydantic import BaseModel
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Optional, List
+import asyncio
 import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -13,7 +15,75 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from db.engine import init_db, get_session, engine
 from db import crud
 
-app = FastAPI(title="noted dashboard")
+
+def _do_scheduled_recap():
+    """Generate today's recap for every context that has notes and no recap yet."""
+    from db.config import get_schedule
+    schedule = get_schedule()
+    recap_type = schedule.get("type", "daily") if schedule else "daily"
+
+    with get_session() as session:
+        contexts = crud.get_contexts(session)
+    for ctx_obj in contexts:
+        ctx = ctx_obj.name
+        try:
+            with get_session() as session:
+                if crud.get_recap(session, day=date.today(), ctx=ctx):
+                    continue
+                gantt = crud.get_gantt_data(session, ctx=ctx)
+                if recap_type == "weekly":
+                    notes = crud.get_notes_last_n_days(session, days=7, ctx=ctx)
+                else:
+                    notes = crud.get_notes_for_recap(session, day=date.today(), ctx=ctx)
+                if not notes:
+                    continue
+            if recap_type == "weekly":
+                from ai.recap import generate_weekly_from_notes_sync
+                summary = generate_weekly_from_notes_sync(notes, gantt=gantt)
+            else:
+                from ai.recap import generate_recap
+                summary = generate_recap(notes, date.today(), gantt=gantt)
+            with get_session() as session:
+                crud.save_recap(session, summary=summary, notes_count=len(notes),
+                                recap_date=date.today(), ctx=ctx)
+        except Exception:
+            pass
+
+
+async def _scheduler_loop():
+    from db.config import get_schedule
+    # Startup check: run immediately if scheduled time has passed today and no recap yet
+    schedule = get_schedule()
+    if schedule:
+        now = datetime.now()
+        h, m = map(int, schedule["time"].split(":"))
+        if now.weekday() in schedule["days"] and (now.hour > h or (now.hour == h and now.minute >= m)):
+            await asyncio.get_event_loop().run_in_executor(None, _do_scheduled_recap)
+
+    while True:
+        # Sleep until next minute boundary
+        await asyncio.sleep(60 - datetime.now().second)
+        schedule = get_schedule()
+        if not schedule:
+            continue
+        now = datetime.now()
+        h, m = map(int, schedule["time"].split(":"))
+        if now.weekday() in schedule["days"] and now.hour == h and now.minute == m:
+            await asyncio.get_event_loop().run_in_executor(None, _do_scheduled_recap)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    task = asyncio.create_task(_scheduler_loop())
+    yield
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
+app = FastAPI(title="noted dashboard", lifespan=lifespan)
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
@@ -534,3 +604,33 @@ async def api_set_model(body: dict):
         raise HTTPException(status_code=400, detail="Modello non valido")
     set_model(model_id)
     return {"model": model_id}
+
+
+class ScheduleConfig(BaseModel):
+    time: str
+    days: List[int]
+    type: str = "daily"
+
+@app.get("/api/schedule")
+async def api_get_schedule():
+    from db.config import get_schedule
+    return get_schedule() or {}
+
+@app.post("/api/schedule")
+async def api_set_schedule(cfg: ScheduleConfig):
+    import re
+    if not re.match(r"^\d{2}:\d{2}$", cfg.time):
+        raise HTTPException(status_code=400, detail="Formato orario non valido (usa HH:MM)")
+    if not all(0 <= d <= 6 for d in cfg.days):
+        raise HTTPException(status_code=400, detail="Giorni non validi (0=lun, 6=dom)")
+    if cfg.type not in ("daily", "weekly"):
+        raise HTTPException(status_code=400, detail="Tipo non valido (daily o weekly)")
+    from db.config import set_schedule
+    set_schedule(cfg.time, cfg.days, cfg.type)
+    return {"ok": True}
+
+@app.delete("/api/schedule")
+async def api_delete_schedule():
+    from db.config import set_schedule
+    set_schedule(None, None)
+    return {"ok": True}

@@ -145,6 +145,10 @@ def generate_weekly_recap(recaps_text: str) -> str:
     return "".join(stream_weekly_recap(recaps_text))
 
 
+def generate_weekly_from_notes_sync(notes: list[Note], gantt: dict | None = None) -> str:
+    return "".join(stream_weekly_from_notes(notes, gantt=gantt))
+
+
 def stream_weekly_from_notes(notes: list[Note],
                               gantt: dict | None = None) -> Iterator[str]:
     from collections import defaultdict

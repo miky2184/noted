@@ -397,6 +397,15 @@
   .backup-menu-item:hover { background: var(--surface2); color: var(--text); }
 
   /* ── Context switcher ───────────────────────────────── */
+  .day-btn {
+    width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--border);
+    background: var(--surface2); color: var(--text-muted); font-size: 0.7rem;
+    font-family: inherit; font-weight: 600; cursor: pointer; padding: 0;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+  }
+  .day-btn.active {
+    background: var(--accent-dim); border-color: var(--accent); color: var(--accent);
+  }
   .ctx-btn {
     display: flex; align-items: center; gap: 6px;
     background: var(--surface2); border: 1px solid var(--border);
@@ -699,6 +708,48 @@
           <option value="claude-sonnet-4-6">✦ Sonnet 4.6</option>
           <option value="claude-opus-4-7">◆ Opus 4.7</option>
         </select>
+      </div>
+    </div>
+
+    <div class="sidebar-section" style="padding-top:12px;padding-bottom:12px;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span class="section-title">⏰ Recap automatico</span>
+        <label style="margin-left:auto;display:flex;align-items:center;cursor:pointer;" title="Attiva/disattiva recap automatico">
+          <input type="checkbox" id="schedule-enabled" style="display:none" onchange="onScheduleToggle(this.checked)">
+          <span id="schedule-toggle-pill" style="display:inline-block;width:32px;height:18px;border-radius:9px;background:var(--surface2);border:1px solid var(--border);position:relative;transition:background 0.2s;">
+            <span style="position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--text-muted);transition:transform 0.2s,background 0.2s;" id="schedule-toggle-dot"></span>
+          </span>
+        </label>
+      </div>
+      <div id="schedule-config" style="display:none;margin-top:10px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <span style="font-size:0.75rem;color:var(--text-muted);min-width:44px;">Orario</span>
+          <input type="time" id="schedule-time" value="08:00"
+            style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:0.8rem;padding:3px 8px;outline:none;flex:1;">
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+          <span style="font-size:0.75rem;color:var(--text-muted);min-width:44px;">Tipo</span>
+          <div style="display:flex;gap:3px;">
+            <button type="button" id="sched-type-daily" onclick="setScheduleType('daily')" class="day-btn active" style="width:auto;padding:0 8px;border-radius:6px;">🤖 Daily</button>
+            <button type="button" id="sched-type-weekly" onclick="setScheduleType('weekly')" class="day-btn" style="width:auto;padding:0 8px;border-radius:6px;">📅 Weekly</button>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;">
+          <span style="font-size:0.75rem;color:var(--text-muted);min-width:44px;">Giorni</span>
+          <div style="display:flex;gap:3px;" id="schedule-days">
+            <button type="button" data-day="0" onclick="toggleDay(this)" class="day-btn active">L</button>
+            <button type="button" data-day="1" onclick="toggleDay(this)" class="day-btn active">M</button>
+            <button type="button" data-day="2" onclick="toggleDay(this)" class="day-btn active">M</button>
+            <button type="button" data-day="3" onclick="toggleDay(this)" class="day-btn active">G</button>
+            <button type="button" data-day="4" onclick="toggleDay(this)" class="day-btn active">V</button>
+            <button type="button" data-day="5" onclick="toggleDay(this)" class="day-btn">S</button>
+            <button type="button" data-day="6" onclick="toggleDay(this)" class="day-btn">D</button>
+          </div>
+        </div>
+        <button onclick="saveSchedule()"
+          style="width:100%;background:var(--accent-dim);border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:4px 0;font-size:0.75rem;font-weight:600;cursor:pointer;font-family:inherit;">
+          Salva
+        </button>
       </div>
     </div>
 
@@ -1590,6 +1641,70 @@ async function generateWeeklyRecap() {
 }
 
 // ── Model selector ────────────────────────────────────────────────────────────
+// ── Schedule ──────────────────────────────────────────────────────────────────
+function _setScheduleToggleUI(enabled) {
+  const pill = document.getElementById('schedule-toggle-pill');
+  const dot  = document.getElementById('schedule-toggle-dot');
+  const cfg  = document.getElementById('schedule-config');
+  document.getElementById('schedule-enabled').checked = enabled;
+  pill.style.background = enabled ? 'var(--accent)' : 'var(--surface2)';
+  dot.style.background  = enabled ? '#fff' : 'var(--text-muted)';
+  dot.style.transform   = enabled ? 'translateX(14px)' : 'translateX(0)';
+  cfg.style.display     = enabled ? 'block' : 'none';
+}
+
+async function onScheduleToggle(enabled) {
+  _setScheduleToggleUI(enabled);
+  if (!enabled) {
+    await fetch('/api/schedule', { method: 'DELETE' });
+    toast('Recap automatico disattivato');
+  } else {
+    await saveSchedule();
+  }
+}
+
+function toggleDay(btn) {
+  btn.classList.toggle('active');
+}
+
+function setScheduleType(type) {
+  document.getElementById('sched-type-daily').classList.toggle('active', type === 'daily');
+  document.getElementById('sched-type-weekly').classList.toggle('active', type === 'weekly');
+}
+
+async function saveSchedule() {
+  const time = document.getElementById('schedule-time').value;
+  const days = [...document.querySelectorAll('#schedule-days .day-btn.active')]
+    .map(b => parseInt(b.dataset.day));
+  const type = document.getElementById('sched-type-daily').classList.contains('active') ? 'daily' : 'weekly';
+  if (!time) { toast('Inserisci un orario valido', 'error'); return; }
+  if (days.length === 0) { toast('Seleziona almeno un giorno', 'error'); return; }
+  const res = await fetch('/api/schedule', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ time, days, type }),
+  });
+  if (res.ok) toast(`Recap ${type} automatico alle ${time} ✓`);
+  else toast('Errore nel salvataggio', 'error');
+}
+
+async function initSchedule() {
+  const res = await fetch('/api/schedule');
+  const data = await res.json();
+  if (data.time) {
+    document.getElementById('schedule-time').value = data.time;
+    document.querySelectorAll('#schedule-days .day-btn').forEach(btn => {
+      btn.classList.toggle('active', data.days.includes(parseInt(btn.dataset.day)));
+    });
+    setScheduleType(data.type || 'daily');
+    _setScheduleToggleUI(true);
+  } else {
+    _setScheduleToggleUI(false);
+  }
+}
+
+initSchedule();
+
 async function setModel(modelId) {
   try {
     await fetch('/api/config/model', {

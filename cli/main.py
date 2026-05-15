@@ -563,23 +563,31 @@ def install_cron(
     time: str = typer.Option("17:30", help="Orario recap giornaliero (HH:MM)"),
 ):
     """Installa il cron job per il recap automatico."""
-    import subprocess
+    import subprocess, shutil
     hour, minute = time.split(":")
-    noted_path = Path(__file__).resolve()
-    python_path = sys.executable
-    cron_line = f"{minute} {hour} * * 1-5 {python_path} {noted_path} recap --save >> ~/.noted/recap.log 2>&1"
+
+    noted_cmd = shutil.which("noted")
+    if not noted_cmd:
+        console.print("[red]Comando 'noted' non trovato nel PATH. Assicurati di aver fatto 'pip install -e .'[/red]")
+        raise typer.Exit(1)
+
+    log_dir = Path("~/.noted").expanduser()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "recap.log"
+
+    cron_line = f"{minute} {hour} * * 1-5 {noted_cmd} recap >> {log_path} 2>&1"
 
     result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
     existing = result.stdout if result.returncode == 0 else ""
 
-    if "noted" in existing:
+    if any("noted recap" in line for line in existing.splitlines()):
         console.print("[yellow]Cron job per noted già presente. Rimuovilo prima con: crontab -e[/yellow]")
         return
 
     new_crontab = existing.rstrip() + f"\n{cron_line}\n"
     subprocess.run(["crontab", "-"], input=new_crontab, text=True)
     console.print(f"⏰ [green]Cron installato: recap automatico ogni giorno lun-ven alle {time}[/green]")
-    console.print(f"[dim]Log: ~/.noted/recap.log[/dim]")
+    console.print(f"[dim]Log: {log_path}[/dim]")
 
 
 if __name__ == "__main__":

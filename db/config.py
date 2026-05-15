@@ -48,3 +48,16 @@ def set_port(port: int) -> None:
     data = _load()
     data["port"] = port
     _save(data)
+
+
+def get_schedule() -> dict | None:
+    return _load().get("schedule")
+
+
+def set_schedule(time_str: str | None, days: list[int] | None, recap_type: str = "daily") -> None:
+    data = _load()
+    if time_str is None:
+        data.pop("schedule", None)
+    else:
+        data["schedule"] = {"time": time_str, "days": days if days is not None else [0, 1, 2, 3, 4], "type": recap_type}
+    _save(data)
