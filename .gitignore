@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+wheels/
+.eggs/
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Secrets
+.env
+*.env.*
+!.env.example
+
+# DB locale (i dati stanno in ~/Library/Application Support/noted/ o simili)
+*.db
+*.sqlite
+*.sqlite3
+
+# Log
+*.log
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# JetBrains / PyCharm
+.idea/
+*.iml
+
+# VS Code
+.vscode/
+
+# Claude Code
+.claude/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
