@@ -213,6 +213,7 @@ def delete_note(session: Session, note_id: int) -> bool:
     note = session.get(Note, note_id)
     if not note:
         return False
+    session.exec(sa_delete(Document).where(Document.note_id == note_id))
     session.delete(note)
     session.commit()
     return True
@@ -442,6 +443,17 @@ def delete_document(session: Session, doc_id: int) -> Optional[Document]:
         return None
     session.delete(doc)
     session.commit()
+    return doc
+
+
+def update_doc_analysis(session: Session, doc_id: int, analysis: str) -> Optional[Document]:
+    doc = session.get(Document, doc_id)
+    if not doc:
+        return None
+    doc.analysis = analysis
+    session.add(doc)
+    session.commit()
+    session.refresh(doc)
     return doc
 
 

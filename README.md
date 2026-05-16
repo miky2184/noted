@@ -174,6 +174,25 @@ Ogni nota può avere uno o più file allegati. I file non vengono salvati nel da
 
 - Click sul chip → apre il file nell'app di default (Anteprima, Word, ecc.)
 - I chip mostrano icona tipo file + nome + dimensione
+- Se il documento è già stato analizzato dall'AI, compare un indicatore 🔍 — il testo dell'analisi è visibile nel tooltip del chip
+
+**Analisi AI documenti:**
+
+Nella sidebar → pulsante **🔍 Analisi AI documenti**:
+
+- Seleziona fino a 5 documenti dalla libreria del contesto attivo
+- Scegli la **profondità di analisi**: Bassa (meno token) · Media · Alta (analisi approfondita)
+- Aggiunge istruzioni personalizzate opzionali (es. "focalizzati sui rischi")
+- L'AI restituisce: riepilogo, punti chiave, elementi suggeriti (note/todo e milestone)
+- Gli elementi suggeriti si possono selezionare e creare direttamente in-app con un click
+- Se viene analizzato un **singolo documento**, il riepilogo viene salvato automaticamente sul documento e mostrato come tooltip 🔍 sulla card della nota
+
+**Nascondi task completati:**
+
+Nel tab Oggi, pulsante **👁 done** nell'header della sezione note:
+- Nasconde tutte le note con `status=done`
+- Mostra un chip in fondo alla lista con il conteggio delle note nascoste (click per riaprirle)
+- Lo stato viene ricordato in localStorage tra le sessioni
 
 **Impostazioni cartella documenti:**
 

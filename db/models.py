@@ -74,4 +74,5 @@ class Document(SQLModel, table=True):
     mime_type: Optional[str] = None
     size_bytes: Optional[int] = None
     sha256: Optional[str] = None
+    analysis: Optional[str] = None    # summary AI salvato dopo analisi
     created_at: datetime = Field(default_factory=datetime.now)

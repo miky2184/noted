@@ -52,6 +52,7 @@ def _migrate():
                 sha256 TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            "ALTER TABLE document ADD COLUMN analysis TEXT",
         ]
         for sql in migrations:
             try:

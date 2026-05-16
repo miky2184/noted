@@ -794,6 +794,13 @@
   .doc-chip:hover { border-color: var(--accent); color: var(--accent); }
   .doc-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .doc-chip-size { color: var(--text-dim); font-size: 0.65rem; flex-shrink: 0; }
+  .doc-chip-ai { flex-shrink: 0; font-size: 0.65rem; opacity: 0.75; }
+  .hide-btn { background: none; border: none; cursor: pointer; font-size: 0.75rem; color: var(--text-dim); opacity: 0; transition: opacity 0.15s; padding: 0 2px; line-height: 1; }
+  .note-item:hover .hide-btn, .board-card:hover .hide-btn { opacity: 0.6; }
+  .hide-btn:hover { opacity: 1 !important; color: var(--text-muted); }
+  .hidden-note-counter { font-size: 0.7rem; color: var(--text-muted); cursor: pointer; padding: 2px 7px; border: 1px dashed var(--border); border-radius: 6px; transition: all 0.15s; }
+  .hidden-note-counter:hover { color: var(--text); border-color: var(--text-muted); }
+  .note-item.shown-hidden { opacity: 0.45; border-style: dashed; }
   .doc-chip-add { border-style: dashed; opacity: 0; transition: opacity 0.15s; }
   .note-item:hover .doc-chip-add { opacity: 1; }
   .doc-chip-add-hidden { opacity: 0; }
@@ -1055,6 +1062,10 @@
       <div class="section-header">
         <span class="section-title" id="notes-section-label">Note di oggi</span>
         <span class="count-badge" id="notes-count">0</span>
+        <button id="hide-done-btn" onclick="toggleHideDone()" title="Nascondi/mostra task completati"
+          style="margin-left:auto;background:none;border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:0.7rem;color:var(--text-muted);cursor:pointer;white-space:nowrap;transition:all 0.15s;">
+          👁 done
+        </button>
       </div>
       <div id="notes-list"></div>
     </div>
@@ -1299,11 +1310,26 @@
       <!-- Left: selector -->
       <div class="doc-analysis-left">
         <div class="doc-analysis-section-title">Documenti disponibili</div>
+        <div id="doc-sel-count" style="font-size:0.7rem;color:var(--text-muted);margin-bottom:2px;">0 / 5 selezionati</div>
         <div id="doc-selector-list" style="display:flex;flex-direction:column;gap:6px;flex:1;overflow-y:auto;"></div>
         <div style="margin-top:8px;">
           <div class="doc-analysis-section-title">Istruzioni aggiuntive</div>
           <textarea class="doc-analysis-extra" id="doc-analysis-extra" rows="3"
             placeholder="Es: focalizzati sui rischi, estrai le date chiave, suggerisci milestone per Q3…"></textarea>
+        </div>
+        <div style="margin-top:8px;">
+          <div class="doc-analysis-section-title">Profondità analisi</div>
+          <div style="display:flex;gap:6px;margin-top:4px;" id="depth-selector">
+            <label style="flex:1;display:flex;align-items:center;gap:5px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:0.72rem;transition:all 0.15s;" id="depth-low">
+              <input type="radio" name="analysis-depth" value="low" style="accent-color:var(--accent);"> Bassa
+            </label>
+            <label style="flex:1;display:flex;align-items:center;gap:5px;padding:5px 8px;border:1px solid var(--accent);border-radius:6px;cursor:pointer;font-size:0.72rem;background:var(--accent-dim);transition:all 0.15s;" id="depth-medium">
+              <input type="radio" name="analysis-depth" value="medium" checked style="accent-color:var(--accent);"> Media
+            </label>
+            <label style="flex:1;display:flex;align-items:center;gap:5px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:0.72rem;transition:all 0.15s;" id="depth-high">
+              <input type="radio" name="analysis-depth" value="high" style="accent-color:var(--accent);"> Alta
+            </label>
+          </div>
         </div>
         <button class="doc-analyze-btn" id="doc-analyze-btn" onclick="runDocAnalysis()">🤖 Analizza</button>
       </div>
@@ -1364,6 +1390,41 @@ let refreshTimer = null;
 let activeTab = 'notes';
 const REFRESH_INTERVAL = 30000;
 let activeCtx = localStorage.getItem('noted-ctx') || '{{ active_ctx }}';
+let hideDone = localStorage.getItem('noted-hide-done') === '1';
+
+// ── Per-note hide (localStorage, no DB) ───────────────────────────────────────
+function _hiddenKey() { return `noted-hidden-${activeCtx}`; }
+function _loadHidden() {
+  try { return new Set(JSON.parse(localStorage.getItem(_hiddenKey()) || '[]')); }
+  catch { return new Set(); }
+}
+function _saveHidden(set) {
+  localStorage.setItem(_hiddenKey(), JSON.stringify([...set]));
+}
+function hideNote(id) {
+  const s = _loadHidden(); s.add(id); _saveHidden(s);
+  if (activeTab === 'notes') loadNotes(); else if (activeTab === 'board') loadBoard();
+}
+function unhideNote(id) {
+  const s = _loadHidden(); s.delete(id); _saveHidden(s);
+  if (activeTab === 'notes') loadNotes(); else loadBoard();
+}
+function clearAllHidden() {
+  localStorage.removeItem(_hiddenKey());
+  if (activeTab === 'notes') loadNotes(); else loadBoard();
+}
+let _showHiddenTemp = false;
+function toggleShowHidden() {
+  _showHiddenTemp = !_showHiddenTemp;
+  if (activeTab === 'notes') loadNotes(); else loadBoard();
+}
+function _syncHiddenCounters() {
+  const n = _loadHidden().size;
+  document.querySelectorAll('.hidden-note-counter').forEach(el => {
+    el.textContent = n > 0 ? `🙈 ${n}` : '';
+    el.style.display = n > 0 ? '' : 'none';
+  });
+}
 
 // ── API wrapper ───────────────────────────────────────────────────────────────
 let _pendingRequests = 0;
@@ -1804,7 +1865,11 @@ document.getElementById('today-btn').addEventListener('click', () => {
 // ── Load notes ────────────────────────────────────────────────────────────────
 let activeTag = null, activeProject = null;
 
+let _loadingNotes = false;
 async function loadNotes() {
+  if (_loadingNotes) return;
+  _loadingNotes = true;
+
   const dot = document.getElementById('refresh-dot');
   dot.classList.add('active');
   setTimeout(() => dot.classList.remove('active'), 600);
@@ -1820,14 +1885,40 @@ async function loadNotes() {
     renderFilterBar();
   } catch(e) {
     console.error(e);
+  } finally {
+    _loadingNotes = false;
   }
+}
+
+function toggleHideDone() {
+  hideDone = !hideDone;
+  localStorage.setItem('noted-hide-done', hideDone ? '1' : '0');
+  _syncHideDoneBtn();
+  loadNotes();
+}
+
+function _syncHideDoneBtn() {
+  const btn = document.getElementById('hide-done-btn');
+  if (!btn) return;
+  btn.style.borderColor = hideDone ? 'var(--accent)' : 'var(--border)';
+  btn.style.color       = hideDone ? 'var(--accent)' : 'var(--text-muted)';
+  btn.style.background  = hideDone ? 'var(--accent-dim)' : '';
+  btn.title = hideDone ? 'Mostra task completati' : 'Nascondi task completati';
+  btn.textContent = hideDone ? '🙈 done' : '👁 done';
 }
 
 function renderNotes(notes) {
   const list = document.getElementById('notes-list');
-  document.getElementById('notes-count').textContent = notes.length;
+  _syncHideDoneBtn();
 
-  if (!notes.length) {
+  const hidden    = _loadHidden();
+  const doneNotes = notes.filter(n => n.status === 'done');
+  const visible   = (hideDone ? notes.filter(n => n.status !== 'done') : notes)
+                    .filter(n => !hidden.has(n.id));
+  const shownHidden = _showHiddenTemp ? notes.filter(n => hidden.has(n.id)) : [];
+  document.getElementById('notes-count').textContent = visible.length;
+
+  if (!visible.length && !notes.length) {
     list.innerHTML = `<div class="empty">
       Nessuna nota${activeTag || activeProject ? ' con questi filtri' : ' per questo giorno'}.<br>
       ${isToday(currentDate) ? 'Aggiungine una qui sopra oppure con: <code>noted add "..."</code>' : ''}
@@ -1835,8 +1926,10 @@ function renderNotes(notes) {
     return;
   }
 
+  const hiddenDoneCount = hideDone ? doneNotes.length : 0;
+
   const today = '{{ today.isoformat() }}';
-  list.innerHTML = notes.map(n => {
+  const noteCards = visible.map(n => {
     const tagsGroup = `<span class="tags-group" onclick="editTags(this,${n.id},'${escHtml(n.tags.join(','))}')" title="Modifica tag">${
       n.tags.length
         ? n.tags.map(t => `<span class="tag">#${escHtml(t)}</span>`).join('')
@@ -1859,6 +1952,7 @@ function renderNotes(notes) {
         <span class="priority priority-${n.priority}" onclick="cyclePriority(${n.id},'${n.priority}')" title="Clicca per cambiare priorità">${n.priority}</span>
         <span class="due-date${n.due_date ? (n.due_date < today ? ' overdue' : (n.due_date <= new Date(Date.now()+2*86400000).toISOString().slice(0,10) ? ' soon' : '')) : ' due-empty'}" onclick="editDue(this,${n.id},'${n.due_date||''}')" title="Clicca per impostare scadenza">${n.due_date ? '📅 '+n.due_date : '+ scadenza'}</span>
         <span class="note-id">#${n.id}</span>
+        <button class="hide-btn" onclick="hideNote(${n.id})" title="Nascondi nota">🙈</button>
         <button class="delete-btn" onclick="deleteNote(${n.id})" title="Elimina">✕</button>
       </div>
       <div class="note-content" onclick="startEdit(this,${n.id})" title="Clicca per modificare">${escHtml(n.content)}</div>
@@ -1871,9 +1965,10 @@ function renderNotes(notes) {
       ${n.docs && n.docs.length ? `
         <div class="note-docs">
           ${n.docs.map(d => `
-            <button class="doc-chip" onclick="openDoc(${d.id})" title="${escHtml(d.orig_name)}">
+            <button class="doc-chip" onclick="openDoc(${d.id})" title="${escHtml(d.orig_name)}${d.analysis ? '\n\n' + escHtml(d.analysis) : ''}">
               ${_fileIcon(d.mime_type, d.orig_name)}
               <span>${escHtml(d.orig_name)}</span>
+              ${d.analysis ? '<span class="doc-chip-ai" title="Analisi AI disponibile">🔍</span>' : ''}
               <span class="doc-chip-size">${_fmtSize(d.size_bytes)}</span>
             </button>
           `).join('')}
@@ -1882,6 +1977,48 @@ function renderNotes(notes) {
       ` : `<button class="doc-chip doc-chip-add doc-chip-add-hidden" onclick="attachToNote(${n.id})" title="Allega file">📎</button>`}
     </div>`;
   }).join('');
+
+  // Shown-hidden notes (dimmed, with unhide button)
+  const shownHiddenCards = shownHidden.map(n => `
+    <div class="note-item shown-hidden" data-id="${n.id}">
+      <div class="note-meta">
+        <span class="note-time">${n.created_at.slice(11, 16)}</span>
+        ${n.project ? `<span class="project-badge">${escHtml(n.project)}</span>` : ''}
+        <span style="font-size:0.72rem;color:var(--text-muted);flex:1;">${escHtml(n.content.slice(0,60))}${n.content.length>60?'…':''}</span>
+        <button class="hide-btn" style="opacity:1;color:var(--accent);" onclick="unhideNote(${n.id})" title="Mostra nota">👁</button>
+      </div>
+    </div>`).join('');
+
+  const doneChip = hiddenDoneCount > 0
+    ? `<div style="text-align:center;padding:6px 0;">
+        <button onclick="toggleHideDone()" style="background:none;border:1px dashed var(--border);border-radius:6px;padding:5px 14px;font-size:0.72rem;color:var(--text-muted);cursor:pointer;">
+          ✓ ${hiddenDoneCount} completat${hiddenDoneCount === 1 ? 'a' : 'e'} nascost${hiddenDoneCount === 1 ? 'a' : 'e'} — clicca per mostrare
+        </button>
+      </div>`
+    : '';
+
+  const hiddenCount = hidden.size;
+  const hiddenChip = hiddenCount > 0 && !_showHiddenTemp
+    ? `<div style="text-align:center;padding:6px 0;">
+        <button onclick="toggleShowHidden()" style="background:none;border:1px dashed var(--border);border-radius:6px;padding:5px 14px;font-size:0.72rem;color:var(--text-muted);cursor:pointer;">
+          🙈 ${hiddenCount} nascost${hiddenCount === 1 ? 'a' : 'e'} — clicca per gestire
+        </button>
+      </div>`
+    : _showHiddenTemp
+      ? `<div style="text-align:center;padding:4px 0;">
+          <button onclick="toggleShowHidden()" style="background:none;border:none;font-size:0.7rem;color:var(--accent);cursor:pointer;">▲ nascondi gestione</button>
+          <button onclick="clearAllHidden()" style="background:none;border:none;font-size:0.7rem;color:var(--red);cursor:pointer;margin-left:8px;">✕ sblocca tutte</button>
+        </div>`
+      : '';
+
+  list.innerHTML = noteCards + shownHiddenCards + doneChip + hiddenChip;
+
+  if (!visible.length && hiddenDoneCount === 0 && hiddenCount === 0) {
+    list.innerHTML = `<div class="empty">
+      Nessuna nota${activeTag || activeProject ? ' con questi filtri' : ' per questo giorno'}.<br>
+      ${isToday(currentDate) ? 'Aggiungine una qui sopra oppure con: <code>noted add "..."</code>' : ''}
+    </div>`;
+  }
 }
 
 function renderFilterBar() {
@@ -2376,6 +2513,7 @@ function clearBoardFilters() {
 function renderBoard(data) {
   const container = document.getElementById('board-container');
   const today = new Date().toISOString().slice(0,10);
+  const hidden = _loadHidden();
   const COLS = [
     { key: 'inbox',    label: '📥 Inbox',     color: 'var(--text-muted)' },
     { key: 'backlog',  label: '🗂 Backlog',   color: '#64748b' },
@@ -2386,16 +2524,30 @@ function renderBoard(data) {
     { key: 'done',     label: '✅ Done',      color: 'var(--green)' },
   ];
   container.innerHTML = COLS.map(col => {
-    const notes = data[col.key] || [];
+    const allNotes  = data[col.key] || [];
+    const visible   = allNotes.filter(n => !hidden.has(n.id));
+    const hiddenCol = allNotes.filter(n => hidden.has(n.id));
+    const hiddenChip = hiddenCol.length
+      ? `<div style="padding:6px 8px;border-top:1px solid var(--border);">
+          <button onclick="toggleShowHidden()" style="background:none;border:none;font-size:0.7rem;color:var(--text-muted);cursor:pointer;width:100%;text-align:left;">
+            🙈 ${hiddenCol.length} nascost${hiddenCol.length===1?'a':'e'}
+          </button>
+        </div>`
+      : '';
+    const shownDimmed = _showHiddenTemp
+      ? allNotes.filter(n => _loadHidden().has(n.id)).map(n => boardCard(n, today, true)).join('')
+      : '';
     return `
     <div class="board-col" data-status="${col.key}">
       <div class="board-col-header">
         <span class="board-col-title" style="color:${col.color}">${col.label}</span>
-        <span class="count-badge" id="col-count-${col.key}">${notes.length}</span>
+        <span class="count-badge" id="col-count-${col.key}">${visible.length}</span>
       </div>
       <div class="board-col-body" data-status="${col.key}">
-        ${notes.length ? notes.map(n => boardCard(n, today)).join('') : ''}
+        ${visible.map(n => boardCard(n, today)).join('')}
+        ${shownDimmed}
       </div>
+      ${hiddenChip}
     </div>`;
   }).join('');
   initSortable();
@@ -2438,18 +2590,22 @@ function initSortable() {
   });
 }
 
-function boardCard(n, today) {
+function boardCard(n, today, dimmed = false) {
   const assigneeHtml = n.assignee ? `<span class="assignee-badge">@${escHtml(n.assignee)}</span>` : '';
   const projHtml = n.project ? `<span class="project-badge">${escHtml(n.project)}</span>` : '';
   const dueHtml = n.due_date ? `<span class="due-date ${n.due_date < today ? 'overdue' : (n.due_date === today ? 'soon' : '')}" style="font-size:0.65rem">📅 ${n.due_date}</span>` : '';
+  const hideHtml = dimmed
+    ? `<button class="hide-btn" style="opacity:1;color:var(--accent);margin-left:auto;" onclick="unhideNote(${n.id})" title="Mostra nota">👁</button>`
+    : `<button class="hide-btn" onclick="hideNote(${n.id})" title="Nascondi nota">🙈</button>
+       <button class="delete-btn" onclick="deleteNote(${n.id})" title="Elimina" style="opacity:0">✕</button>`;
   return `
-  <div class="board-card priority-${n.priority}" data-id="${n.id}">
+  <div class="board-card priority-${n.priority}${dimmed ? ' shown-hidden' : ''}" data-id="${n.id}" style="${dimmed ? 'pointer-events:auto;' : ''}">
     <div class="board-card-content" onclick="startEdit(this,${n.id})" title="Clicca per modificare">${escHtml(n.content)}</div>
     <div class="board-card-meta">
       ${projHtml}${assigneeHtml}
       <span class="status status-${n.status}" onclick="cycleStatus(${n.id},'${n.status||''}')" title="Avanza stato" style="cursor:pointer">${STATUS_LABEL[n.status]||''}</span>
       ${dueHtml}
-      <button class="delete-btn" onclick="deleteNote(${n.id})" title="Elimina" style="margin-left:auto;opacity:0">✕</button>
+      <span style="margin-left:auto;display:flex;gap:4px;align-items:center;">${hideHtml}</span>
     </div>
   </div>`;
 }
@@ -3439,9 +3595,45 @@ async function _loadDocsForAnalysis() {
   }
 }
 
+const _MAX_ANALYSIS_DOCS = 5;
+
 function _syncSelectorStyle(id, checked) {
+  const all = [...document.querySelectorAll('#doc-selector-list input[type=checkbox]')];
+  const nChecked = all.filter(c => c.checked).length;
+
+  // Se si cerca di aggiungere oltre il limite, blocca
+  if (checked && nChecked > _MAX_ANALYSIS_DOCS) {
+    const inp = document.querySelector(`#dsel-${id} input`);
+    if (inp) inp.checked = false;
+    toast(`Massimo ${_MAX_ANALYSIS_DOCS} documenti per analisi`, 'error');
+    _updateDocSelCount();
+    return;
+  }
+
   document.getElementById(`dsel-${id}`)?.classList.toggle('selected', checked);
+  _updateDocSelCount();
 }
+
+function _updateDocSelCount() {
+  const all     = [...document.querySelectorAll('#doc-selector-list input[type=checkbox]')];
+  const n       = all.filter(c => c.checked).length;
+  const el      = document.getElementById('doc-sel-count');
+  if (!el) return;
+  el.textContent = `${n} / ${_MAX_ANALYSIS_DOCS} selezionati`;
+  el.style.color = n >= _MAX_ANALYSIS_DOCS ? 'var(--yellow)' : 'var(--text-muted)';
+}
+
+// Depth selector visual highlight
+document.addEventListener('change', e => {
+  if (e.target.name !== 'analysis-depth') return;
+  ['low','medium','high'].forEach(d => {
+    const lbl = document.getElementById(`depth-${d}`);
+    if (!lbl) return;
+    const active = e.target.value === d;
+    lbl.style.borderColor = active ? 'var(--accent)' : 'var(--border)';
+    lbl.style.background   = active ? 'var(--accent-dim)' : '';
+  });
+});
 
 async function runDocAnalysis() {
   const checked = [...document.querySelectorAll('#doc-selector-list input[type=checkbox]:checked')];
@@ -3449,6 +3641,7 @@ async function runDocAnalysis() {
 
   const docIds = checked.map(c => parseInt(c.value));
   const extra  = document.getElementById('doc-analysis-extra').value.trim();
+  const depth  = document.querySelector('input[name="analysis-depth"]:checked')?.value || 'medium';
 
   const btn = document.getElementById('doc-analyze-btn');
   btn.disabled = true;
@@ -3462,7 +3655,7 @@ async function runDocAnalysis() {
     const res = await fetch('/api/analyze-docs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ doc_ids: docIds, extra_instructions: extra || null }),
+      body: JSON.stringify({ doc_ids: docIds, extra_instructions: extra || null, depth }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));

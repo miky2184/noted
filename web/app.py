@@ -129,6 +129,7 @@ def _doc_dict(d):
         "orig_name": d.orig_name,
         "mime_type": d.mime_type,
         "size_bytes": d.size_bytes,
+        "analysis": d.analysis,
         "created_at": d.created_at.isoformat(),
     }
 
@@ -544,7 +545,25 @@ async def api_list_docs(request: Request):
 
 # ── Document analysis ──────────────────────────────────────────────────────────
 
-def _extract_text(fp: Path, mime: str | None) -> tuple[str, str]:
+_MAX_DOCS        = 5
+_MAX_IMAGE_BYTES = 1_048_576  # 1 MB per immagine
+
+_DEPTH_LIMITS = {
+    "low":    {"chars_per_doc": 2_000,  "total_chars": 6_000,  "max_tokens": 512},
+    "medium": {"chars_per_doc": 6_000,  "total_chars": 24_000, "max_tokens": 1024},
+    "high":   {"chars_per_doc": 15_000, "total_chars": 50_000, "max_tokens": 2048},
+}
+
+
+def _smart_truncate(text: str, limit: int) -> str:
+    """Prendi inizio e fine del testo per non perdere le conclusioni."""
+    if len(text) <= limit:
+        return text
+    half = limit // 2
+    return text[:half] + "\n\n[…]\n\n" + text[-half:]
+
+
+def _extract_text(fp: Path, mime: str | None, chars_limit: int = 6_000) -> tuple[str, str]:
     """Return (text, mode) where mode is 'text' or 'image'."""
     mime = mime or ""
     suffix = fp.suffix.lower()
@@ -557,7 +576,7 @@ def _extract_text(fp: Path, mime: str | None) -> tuple[str, str]:
             from pypdf import PdfReader
             reader = PdfReader(str(fp))
             text = "\n".join(p.extract_text() or "" for p in reader.pages)
-            return (text[:40_000], "text")
+            return (_smart_truncate(text, chars_limit), "text")
         except Exception as e:
             return (f"[Errore lettura PDF: {e}]", "text")
 
@@ -566,13 +585,13 @@ def _extract_text(fp: Path, mime: str | None) -> tuple[str, str]:
             from docx import Document as DocxDoc
             doc = DocxDoc(str(fp))
             text = "\n".join(p.text for p in doc.paragraphs)
-            return (text[:40_000], "text")
+            return (_smart_truncate(text, chars_limit), "text")
         except Exception as e:
             return (f"[Errore lettura DOCX: {e}]", "text")
 
     # Fallback: plain text
     try:
-        return (fp.read_text(errors="replace")[:40_000], "text")
+        return (_smart_truncate(fp.read_text(errors="replace"), chars_limit), "text")
     except Exception:
         return ("[Formato non supportato]", "text")
 
@@ -613,6 +632,7 @@ Suggerisci solo elementi concreti e azionabili. Le date delle milestone devono e
 class AnalyzeDocsRequest(BaseModel):
     doc_ids: list[int]
     extra_instructions: Optional[str] = None
+    depth: str = "medium"  # low | medium | high
 
 
 @app.post("/api/analyze-docs")
@@ -623,6 +643,14 @@ async def api_analyze_docs(request: Request, body: AnalyzeDocsRequest):
 
     if not body.doc_ids:
         raise HTTPException(status_code=400, detail="Nessun documento selezionato")
+    if len(body.doc_ids) > _MAX_DOCS:
+        raise HTTPException(status_code=400,
+            detail=f"Massimo {_MAX_DOCS} documenti per analisi (selezionati: {len(body.doc_ids)})")
+
+    limits = _DEPTH_LIMITS.get(body.depth, _DEPTH_LIMITS["medium"])
+    max_chars_per_doc = limits["chars_per_doc"]
+    max_total_chars   = limits["total_chars"]
+    max_tokens        = limits["max_tokens"]
 
     doc_root = Path(get_doc_root()).expanduser()
     client = Anthropic()
@@ -637,14 +665,21 @@ async def api_analyze_docs(request: Request, body: AnalyzeDocsRequest):
     # Build message content — mix text blocks and image blocks
     content_parts: list = []
     docs_block_lines: list[str] = []
+    total_chars = 0
 
     for doc in docs:
         fp = doc_root / doc.rel_path
         if not fp.is_file():
             continue
-        text, mode = _extract_text(fp, doc.mime_type)
+        text, mode = _extract_text(fp, doc.mime_type, chars_limit=max_chars_per_doc)
         if mode == "image":
-            img_data = base64.standard_b64encode(fp.read_bytes()).decode()
+            img_bytes = fp.read_bytes()
+            if len(img_bytes) > _MAX_IMAGE_BYTES:
+                docs_block_lines.append(
+                    f"--- Documento: {doc.orig_name} ---\n[immagine troppo grande, saltata]"
+                )
+                continue
+            img_data = base64.standard_b64encode(img_bytes).decode()
             media_type = doc.mime_type or "image/png"
             if media_type not in ("image/jpeg", "image/png", "image/gif", "image/webp"):
                 media_type = "image/png"
@@ -657,9 +692,15 @@ async def api_analyze_docs(request: Request, body: AnalyzeDocsRequest):
                 "source": {"type": "base64", "media_type": media_type, "data": img_data}
             })
         else:
-            docs_block_lines.append(
-                f"--- Documento: {doc.orig_name} ---\n{text or '[vuoto]'}"
-            )
+            remaining = max_total_chars - total_chars
+            if remaining <= 0:
+                docs_block_lines.append(
+                    f"--- Documento: {doc.orig_name} ---\n[saltato: budget testo esaurito]"
+                )
+                continue
+            text = text[:remaining]
+            total_chars += len(text)
+            docs_block_lines.append(f"--- Documento: {doc.orig_name} ---\n{text or '[vuoto]'}")
 
     from datetime import date as _date
     today_str = _date.today().isoformat()
@@ -675,12 +716,11 @@ async def api_analyze_docs(request: Request, body: AnalyzeDocsRequest):
     try:
         response = client.messages.create(
             model=model,
-            max_tokens=4096,
+            max_tokens=max_tokens,
             system=_ANALYSIS_SYSTEM,
             messages=[{"role": "user", "content": content_parts}],
         )
         raw = response.content[0].text.strip()
-        # Strip markdown code fences if present
         if raw.startswith("```"):
             raw = raw.split("```", 2)[1]
             if raw.startswith("json"):
@@ -691,6 +731,14 @@ async def api_analyze_docs(request: Request, body: AnalyzeDocsRequest):
         raise HTTPException(status_code=500, detail="Il modello non ha restituito JSON valido")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+    # Persist analysis on the document when a single doc was analysed
+    if len(docs) == 1:
+        summary = result.get("summary", "")
+        if summary:
+            with get_session() as session:
+                crud.update_doc_analysis(session, docs[0].id, summary)
+            result["saved_to_doc"] = True
 
     return result
 
