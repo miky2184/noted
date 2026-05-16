@@ -1,4 +1,5 @@
 from sqlmodel import SQLModel, create_engine, Session
+from sqlalchemy import event
 import os
 
 def _default_db_url() -> str:
@@ -7,7 +8,20 @@ def _default_db_url() -> str:
 
 DATABASE_URL = os.getenv("DATABASE_URL") or _default_db_url()
 
-engine = create_engine(DATABASE_URL, echo=False)
+engine = create_engine(
+    DATABASE_URL,
+    echo=False,
+    connect_args={"check_same_thread": False},
+)
+
+@event.listens_for(engine, "connect")
+def _set_sqlite_pragmas(dbapi_conn, _):
+    cur = dbapi_conn.cursor()
+    cur.execute("PRAGMA journal_mode=WAL")       # write-ahead log: no lock contention
+    cur.execute("PRAGMA synchronous=NORMAL")     # flush at checkpoint, not every write
+    cur.execute("PRAGMA cache_size=-8000")       # 8 MB page cache
+    cur.execute("PRAGMA temp_store=MEMORY")
+    cur.close()
 
 
 def _migrate():
@@ -21,6 +35,13 @@ def _migrate():
             "ALTER TABLE ganttproject ADD COLUMN context VARCHAR DEFAULT 'default'",
             "ALTER TABLE note ADD COLUMN sort_order INTEGER DEFAULT 0",
             "ALTER TABLE ganttproject ADD COLUMN is_background BOOLEAN DEFAULT 0",
+            """CREATE TABLE IF NOT EXISTS notedependency (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                note_id INTEGER NOT NULL REFERENCES note(id),
+                blocker_id INTEGER NOT NULL REFERENCES note(id),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(note_id, blocker_id)
+            )""",
         ]
         for sql in migrations:
             try:

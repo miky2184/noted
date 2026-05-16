@@ -2,7 +2,7 @@ from datetime import date, datetime, timedelta
 from typing import Optional
 from sqlmodel import Session, select
 from sqlalchemy import or_, delete as sa_delete
-from db.models import Note, Recap, GanttProject, Milestone, Context
+from db.models import Note, Recap, GanttProject, Milestone, Context, NoteDependency
 
 
 # ── Context ────────────────────────────────────────────────────────────────────
@@ -331,8 +331,94 @@ def delete_milestone(session: Session, milestone_id: int) -> bool:
     session.delete(m); session.commit()
     return True
 
+# ── Note Dependencies ──────────────────────────────────────────────────────────
+
+def add_dependency(session: Session, note_id: int, blocker_id: int) -> Optional[NoteDependency]:
+    if note_id == blocker_id:
+        return None
+    if not session.get(Note, note_id) or not session.get(Note, blocker_id):
+        return None
+    existing = session.exec(
+        select(NoteDependency).where(NoteDependency.note_id == note_id, NoteDependency.blocker_id == blocker_id)
+    ).first()
+    if existing:
+        return existing
+    dep = NoteDependency(note_id=note_id, blocker_id=blocker_id)
+    session.add(dep)
+    session.commit()
+    session.refresh(dep)
+    return dep
+
+def remove_dependency(session: Session, note_id: int, blocker_id: int) -> bool:
+    dep = session.exec(
+        select(NoteDependency).where(NoteDependency.note_id == note_id, NoteDependency.blocker_id == blocker_id)
+    ).first()
+    if not dep:
+        return False
+    session.delete(dep)
+    session.commit()
+    return True
+
+def get_blockers(session: Session, note_id: int) -> list[Note]:
+    """Note che bloccano note_id."""
+    ids = session.exec(select(NoteDependency.blocker_id).where(NoteDependency.note_id == note_id)).all()
+    if not ids:
+        return []
+    return session.exec(select(Note).where(Note.id.in_(ids))).all()
+
+def get_blocking(session: Session, note_id: int) -> list[Note]:
+    """Note bloccate da note_id."""
+    ids = session.exec(select(NoteDependency.note_id).where(NoteDependency.blocker_id == note_id)).all()
+    if not ids:
+        return []
+    return session.exec(select(Note).where(Note.id.in_(ids))).all()
+
+def get_deps_bulk(session: Session, note_ids: list[int]) -> dict:
+    """Ritorna {note_id: {blockers: [...], blocking: [...]}} per una lista di note."""
+    if not note_ids:
+        return {}
+    all_deps = session.exec(
+        select(NoteDependency).where(
+            or_(NoteDependency.note_id.in_(note_ids), NoteDependency.blocker_id.in_(note_ids))
+        )
+    ).all()
+    result = {nid: {"blockers": [], "blocking": []} for nid in note_ids}
+    blocker_ids = set()
+    blocking_ids = set()
+    for d in all_deps:
+        if d.note_id in result:
+            result[d.note_id]["blockers"].append(d.blocker_id)
+            blocker_ids.add(d.blocker_id)
+        if d.blocker_id in result:
+            result[d.blocker_id]["blocking"].append(d.note_id)
+            blocking_ids.add(d.note_id)
+    # Fetch note summaries for tooltip
+    all_ref_ids = blocker_ids | blocking_ids
+    if all_ref_ids:
+        ref_notes = {n.id: n for n in session.exec(select(Note).where(Note.id.in_(all_ref_ids))).all()}
+        for nid, data in result.items():
+            data["blocker_notes"] = [
+                {"id": rid, "content": ref_notes[rid].content[:60], "status": ref_notes[rid].status}
+                for rid in data["blockers"] if rid in ref_notes
+            ]
+            data["blocking_notes"] = [
+                {"id": rid, "content": ref_notes[rid].content[:60], "status": ref_notes[rid].status}
+                for rid in data["blocking"] if rid in ref_notes
+            ]
+    return result
+
+
+# ── Gantt ──────────────────────────────────────────────────────────────────────
+
 def get_gantt_data(session: Session, ctx: str = "default") -> dict:
+    from sqlalchemy import text as sa_text
     projects = get_gantt_projects(session, ctx=ctx)
+
+    # IDs of notes that are actual blockers of something (appear as blocker_id in NoteDependency)
+    blocker_ids_in_use: set[int] = set(
+        session.exec(select(NoteDependency.blocker_id)).all()
+    )
+
     result = []
     for p in projects:
         milestones = get_milestones(session, p.id)
@@ -340,12 +426,30 @@ def get_gantt_data(session: Session, ctx: str = "default") -> dict:
             select(Note)
             .where(Note.due_date.isnot(None), Note.context == ctx)
             .where(Note.project.ilike(p.name))
+            .where(~(Note.tags == "milestone"))
+            .where(~Note.tags.ilike("milestone,%"))
+            .where(~Note.tags.ilike("%,milestone"))
+            .where(~Note.tags.ilike("%,milestone,%"))
         ).all()
+
+        # All notes of this project (to check risk)
+        all_proj_notes = session.exec(
+            select(Note).where(Note.context == ctx, Note.project.ilike(p.name))
+        ).all()
+
+        # A project has a risk blocker if any of its notes is:
+        # - in a blocking status AND is itself a blocker of another note (has dependents)
+        has_risk_blocker = any(
+            n.status in ("blocked", "waiting", "backlog") and n.id in blocker_ids_in_use
+            for n in all_proj_notes
+        )
+
         result.append({
             "id": p.id,
             "name": p.name,
             "color": p.color,
             "is_background": p.is_background,
+            "has_risk_blocker": has_risk_blocker,
             "milestones": [
                 {"id": m.id, "name": m.name, "start_date": str(m.start_date), "end_date": str(m.end_date)}
                 for m in milestones

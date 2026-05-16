@@ -56,3 +56,11 @@ class Milestone(SQLModel, table=True):
     start_date: date
     end_date: date
     created_at: datetime = Field(default_factory=datetime.now)
+
+
+class NoteDependency(SQLModel, table=True):
+    """note_id dipende da (è bloccata da) blocker_id."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    note_id: int = Field(foreign_key="note.id")
+    blocker_id: int = Field(foreign_key="note.id")
+    created_at: datetime = Field(default_factory=datetime.now)

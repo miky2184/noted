@@ -205,7 +205,16 @@ async def api_notes(
     with get_session() as session:
         notes = crud.get_notes(session, day=target, tag=tag, project=project,
                                assignee=assignee, status=status, ctx=ctx)
-    return [_note_dict(n) for n in notes]
+        note_ids = [n.id for n in notes]
+        deps = crud.get_deps_bulk(session, note_ids)
+    result = []
+    for n in notes:
+        d = _note_dict(n)
+        nd = deps.get(n.id, {})
+        d["blockers"] = nd.get("blocker_notes", [])
+        d["blocking"] = nd.get("blocking_notes", [])
+        result.append(d)
+    return result
 
 
 class NoteCreate(BaseModel):
@@ -263,6 +272,16 @@ async def api_update_note(note_id: int, body: NoteUpdate):
     return _note_dict(note)
 
 
+@app.get("/api/search")
+async def api_search(request: Request, q: str = Query(""), limit: int = Query(20)):
+    ctx = _get_ctx(request)
+    if not q.strip():
+        return []
+    with get_session() as session:
+        notes = crud.search_notes(session, query=q.strip(), ctx=ctx, limit=limit)
+    return [_note_dict(n) for n in notes]
+
+
 @app.get("/api/notes/due")
 async def api_due_notes(request: Request):
     ctx = _get_ctx(request)
@@ -300,6 +319,48 @@ async def api_move_note(note_id: int, body: MoveNote, request: Request):
                 session.add(n)
         session.add(note)
         session.commit()
+
+
+@app.get("/api/notes/{note_id}/deps")
+async def api_get_deps(note_id: int, request: Request):
+    ctx = _get_ctx(request)
+    with get_session() as session:
+        note = session.get(crud.Note, note_id)
+        if not note or note.context != ctx:
+            raise HTTPException(status_code=404, detail="Nota non trovata")
+        blockers = crud.get_blockers(session, note_id)
+        blocking = crud.get_blocking(session, note_id)
+        return {
+            "blockers": [{"id": n.id, "content": n.content[:80], "status": n.status} for n in blockers],
+            "blocking": [{"id": n.id, "content": n.content[:80], "status": n.status} for n in blocking],
+        }
+
+class DepBody(BaseModel):
+    blocker_id: int
+
+@app.post("/api/notes/{note_id}/deps", status_code=201)
+async def api_add_dep(note_id: int, body: DepBody, request: Request):
+    ctx = _get_ctx(request)
+    with get_session() as session:
+        note = session.get(crud.Note, note_id)
+        if not note or note.context != ctx:
+            raise HTTPException(status_code=404, detail="Nota non trovata")
+        blocker = session.get(crud.Note, body.blocker_id)
+        if not blocker:
+            raise HTTPException(status_code=404, detail="Nota blocker non trovata")
+        dep = crud.add_dependency(session, note_id, body.blocker_id)
+        if not dep:
+            raise HTTPException(status_code=400, detail="Dipendenza non valida o già esistente")
+        return {"id": dep.id, "note_id": dep.note_id, "blocker_id": dep.blocker_id}
+
+@app.delete("/api/notes/{note_id}/deps/{blocker_id}", status_code=204)
+async def api_remove_dep(note_id: int, blocker_id: int, request: Request):
+    ctx = _get_ctx(request)
+    with get_session() as session:
+        note = session.get(crud.Note, note_id)
+        if not note or note.context != ctx:
+            raise HTTPException(status_code=404, detail="Nota non trovata")
+        crud.remove_dependency(session, note_id, blocker_id)
 
 
 @app.get("/api/board")
@@ -505,17 +566,14 @@ async def api_delete_recap(recap_id: int):
 
 @app.get("/api/backup/db")
 async def api_backup_db():
-    import base64
+    from fastapi.responses import FileResponse
     from db.paths import db_path as get_db_path
     path = get_db_path()
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Database non trovato: {path}")
-    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
-    return {
-        "filename": f"noted_backup_{date.today().isoformat()}.db",
-        "encoding": "base64",
-        "data": encoded,
-    }
+    filename = f"noted_backup_{date.today().isoformat()}.db"
+    return FileResponse(path, media_type="application/octet-stream",
+                        filename=filename, headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 @app.post("/api/restore/db")
 async def api_restore_db(request: Request):
