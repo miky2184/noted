@@ -798,6 +798,109 @@
   .note-item:hover .doc-chip-add { opacity: 1; }
   .doc-chip-add-hidden { opacity: 0; }
   .note-item:hover .doc-chip-add-hidden { opacity: 0.6; }
+
+  /* ── Doc analysis modal ──────────────────────────────── */
+  .doc-analysis-panel {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; width: min(900px, 96vw); max-height: 88vh;
+    display: flex; flex-direction: column;
+    box-shadow: 0 16px 60px rgba(0,0,0,0.5); overflow: hidden;
+  }
+  .doc-analysis-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+    font-size: 0.9rem; font-weight: 700; color: var(--text); flex-shrink: 0;
+  }
+  .doc-analysis-header button {
+    background: none; border: none; color: var(--text-muted);
+    font-size: 18px; cursor: pointer; padding: 2px 6px; border-radius: 4px;
+    line-height: 1; transition: color 0.15s;
+  }
+  .doc-analysis-header button:hover { color: var(--text); }
+  .doc-analysis-body {
+    display: grid; grid-template-columns: 280px 1fr;
+    flex: 1; overflow: hidden;
+  }
+  .doc-analysis-left {
+    border-right: 1px solid var(--border); padding: 16px;
+    display: flex; flex-direction: column; gap: 10px; overflow-y: auto;
+  }
+  .doc-analysis-right {
+    padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px;
+  }
+  .doc-analysis-section-title {
+    font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 6px;
+  }
+  .doc-selector-item {
+    display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px;
+    border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
+    transition: border-color 0.15s; font-size: 0.8rem;
+  }
+  .doc-selector-item:hover { border-color: var(--accent); }
+  .doc-selector-item.selected { border-color: var(--accent); background: var(--accent-dim); }
+  .doc-selector-item input[type=checkbox] { margin-top: 2px; flex-shrink: 0; accent-color: var(--accent); }
+  .doc-selector-name { color: var(--text); font-weight: 500; word-break: break-word; }
+  .doc-selector-meta { font-size: 0.68rem; color: var(--text-muted); margin-top: 2px; }
+  .doc-analyze-btn {
+    background: var(--accent); color: #0d0f1a; border: none;
+    border-radius: 8px; padding: 9px; font-size: 0.82rem; font-weight: 700;
+    cursor: pointer; transition: opacity 0.15s; margin-top: auto;
+  }
+  .doc-analyze-btn:hover { opacity: 0.85; }
+  .doc-analyze-btn:disabled { opacity: 0.4; cursor: default; }
+  .doc-analysis-extra {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); font-family: inherit; font-size: 0.78rem;
+    padding: 6px 10px; outline: none; width: 100%; resize: none;
+    transition: border-color 0.15s;
+  }
+  .doc-analysis-extra:focus { border-color: var(--accent); }
+  .doc-analysis-summary {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px 14px; font-size: 0.85rem; line-height: 1.65; color: var(--text-muted);
+  }
+  .doc-insights { padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+  .doc-insights li { font-size: 0.82rem; color: var(--text-muted); line-height: 1.5; }
+  .doc-item-card {
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+    display: flex; align-items: flex-start; gap: 10px; cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .doc-item-card:hover { border-color: var(--border-hover); }
+  .doc-item-card.selected { border-color: var(--accent); background: var(--accent-dim); }
+  .doc-item-card input[type=checkbox] { margin-top: 3px; flex-shrink: 0; accent-color: var(--accent); }
+  .doc-item-body { flex: 1; min-width: 0; }
+  .doc-item-type { font-size: 0.62rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 3px; }
+  .doc-item-content { font-size: 0.83rem; color: var(--text); line-height: 1.5; }
+  .doc-item-meta { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+  .doc-create-btn {
+    background: var(--green); color: #0d0f1a; border: none;
+    border-radius: 8px; padding: 9px 18px; font-size: 0.85rem; font-weight: 700;
+    cursor: pointer; transition: opacity 0.15s; align-self: flex-start; margin-top: 4px;
+  }
+  .doc-create-btn:hover { opacity: 0.85; }
+  .doc-analysis-loading {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 14px; padding: 60px 20px; color: var(--text-muted); font-size: 0.88rem;
+  }
+  .doc-analysis-spinner {
+    width: 32px; height: 32px; border: 3px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  .doc-analysis-placeholder {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 10px; padding: 60px 20px; color: var(--text-muted); font-size: 0.85rem;
+    text-align: center; line-height: 1.7;
+  }
+  .doc-analysis-placeholder-icon { font-size: 2.5rem; opacity: 0.4; }
+  @media (max-width: 768px) {
+    .doc-analysis-panel { width: 100%; max-height: 100%; border-radius: 0; }
+    .doc-analysis-body { grid-template-columns: 1fr; }
+    .doc-analysis-left { border-right: none; border-bottom: 1px solid var(--border); max-height: 280px; }
+  }
 </style>
 </head>
 <body>
@@ -1095,6 +1198,7 @@
           <button onclick="saveDocRoot()" style="background:var(--accent);color:#0d0f1a;border:none;border-radius:6px;padding:5px 12px;font-size:0.78rem;font-weight:700;cursor:pointer;">Salva</button>
         </div>
         <button onclick="openDocFolder()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:0.75rem;color:var(--text-muted);cursor:pointer;text-align:left;transition:all 0.15s;" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-muted)'">📂 Apri cartella in Finder</button>
+        <button onclick="openDocAnalysis()" style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:6px;padding:6px 10px;font-size:0.75rem;color:var(--accent);cursor:pointer;text-align:left;font-weight:600;transition:all 0.15s;">🔍 Analisi AI documenti</button>
       </div>
     </div>
 
@@ -1179,6 +1283,61 @@
       <div class="voice-status">
         <span class="voice-status-icon">⏳</span>
         <div class="voice-status-label">Trascrizione in corso…</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Doc analysis modal -->
+<div class="modal-overlay" id="doc-analysis-modal" onclick="closeDocAnalysis(event)">
+  <div class="doc-analysis-panel">
+    <div class="doc-analysis-header">
+      <span>🔍 Analisi AI documenti</span>
+      <button onclick="closeDocAnalysis()">✕</button>
+    </div>
+    <div class="doc-analysis-body">
+      <!-- Left: selector -->
+      <div class="doc-analysis-left">
+        <div class="doc-analysis-section-title">Documenti disponibili</div>
+        <div id="doc-selector-list" style="display:flex;flex-direction:column;gap:6px;flex:1;overflow-y:auto;"></div>
+        <div style="margin-top:8px;">
+          <div class="doc-analysis-section-title">Istruzioni aggiuntive</div>
+          <textarea class="doc-analysis-extra" id="doc-analysis-extra" rows="3"
+            placeholder="Es: focalizzati sui rischi, estrai le date chiave, suggerisci milestone per Q3…"></textarea>
+        </div>
+        <button class="doc-analyze-btn" id="doc-analyze-btn" onclick="runDocAnalysis()">🤖 Analizza</button>
+      </div>
+      <!-- Right: results -->
+      <div class="doc-analysis-right" id="doc-analysis-right">
+        <div class="doc-analysis-placeholder" id="doc-analysis-placeholder">
+          <span class="doc-analysis-placeholder-icon">🔍</span>
+          <span>Seleziona uno o più documenti<br>e clicca <strong>Analizza</strong></span>
+        </div>
+        <div class="doc-analysis-loading" id="doc-analysis-loading" style="display:none;">
+          <div class="doc-analysis-spinner"></div>
+          <span>Analisi in corso…</span>
+        </div>
+        <div id="doc-analysis-output" style="display:none;flex-direction:column;gap:14px;">
+          <div>
+            <div class="doc-analysis-section-title">Riepilogo</div>
+            <div class="doc-analysis-summary" id="doc-analysis-summary"></div>
+          </div>
+          <div id="doc-insights-wrap" style="display:none;">
+            <div class="doc-analysis-section-title">Punti chiave</div>
+            <ul class="doc-insights" id="doc-analysis-insights"></ul>
+          </div>
+          <div id="doc-items-wrap" style="display:none;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+              <div class="doc-analysis-section-title" style="margin-bottom:0;">Elementi suggeriti</div>
+              <label style="font-size:0.72rem;color:var(--text-muted);display:flex;align-items:center;gap:5px;cursor:pointer;">
+                <input type="checkbox" id="doc-select-all" onchange="docSelectAll(this.checked)" style="accent-color:var(--accent);">
+                seleziona tutti
+              </label>
+            </div>
+            <div id="doc-analysis-items" style="display:flex;flex-direction:column;gap:6px;"></div>
+            <button class="doc-create-btn" id="doc-create-btn" onclick="createDocItems()" style="margin-top:10px;">✓ Crea selezionati</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -3240,6 +3399,205 @@ function pwaRefresh() {
     if (reached) pwaRefresh();
   });
 })();
+
+// ── Doc analysis ──────────────────────────────────────────────────────────────
+let _analysisItems = [];   // risultati correnti dall'AI
+
+async function openDocAnalysis() {
+  document.getElementById('doc-analysis-modal').classList.add('show');
+  closeMobileSidebar();
+  await _loadDocsForAnalysis();
+}
+
+function closeDocAnalysis(e) {
+  if (e && e.target !== document.getElementById('doc-analysis-modal')) return;
+  document.getElementById('doc-analysis-modal').classList.remove('show');
+}
+
+async function _loadDocsForAnalysis() {
+  const ctx = document.getElementById('ctx-label')?.textContent?.toLowerCase() || 'default';
+  const list = document.getElementById('doc-selector-list');
+  list.innerHTML = '<div style="color:var(--text-muted);font-size:0.8rem;padding:8px 0;">Caricamento…</div>';
+  try {
+    const res = await fetch(`/api/docs?ctx=${encodeURIComponent(ctx)}`);
+    const docs = await res.json();
+    if (!docs.length) {
+      list.innerHTML = '<div style="color:var(--text-muted);font-size:0.8rem;padding:8px 0;">Nessun documento trovato.<br>Allega file alle tue note per vederli qui.</div>';
+      return;
+    }
+    list.innerHTML = docs.map(d => `
+      <label class="doc-selector-item" id="dsel-${d.id}">
+        <input type="checkbox" value="${d.id}" onchange="_syncSelectorStyle(${d.id}, this.checked)">
+        <div style="min-width:0;">
+          <div class="doc-selector-name">${_fileIcon(d.mime_type, d.orig_name)} ${escHtml(d.orig_name)}</div>
+          <div class="doc-selector-meta">${d.rel_path.split('/').slice(0,-1).join(' / ')} · ${_fmtSize(d.size_bytes)}</div>
+        </div>
+      </label>
+    `).join('');
+  } catch {
+    list.innerHTML = '<div style="color:var(--red);font-size:0.8rem;">Errore nel caricamento</div>';
+  }
+}
+
+function _syncSelectorStyle(id, checked) {
+  document.getElementById(`dsel-${id}`)?.classList.toggle('selected', checked);
+}
+
+async function runDocAnalysis() {
+  const checked = [...document.querySelectorAll('#doc-selector-list input[type=checkbox]:checked')];
+  if (!checked.length) { toast('Seleziona almeno un documento', 'error'); return; }
+
+  const docIds = checked.map(c => parseInt(c.value));
+  const extra  = document.getElementById('doc-analysis-extra').value.trim();
+
+  const btn = document.getElementById('doc-analyze-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Analisi…';
+
+  document.getElementById('doc-analysis-placeholder').style.display = 'none';
+  document.getElementById('doc-analysis-loading').style.display = 'flex';
+  document.getElementById('doc-analysis-output').style.display = 'none';
+
+  try {
+    const res = await fetch('/api/analyze-docs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ doc_ids: docIds, extra_instructions: extra || null }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Errore ${res.status}`);
+    }
+    const result = await res.json();
+    _renderAnalysisResults(result);
+  } catch (e) {
+    document.getElementById('doc-analysis-loading').style.display = 'none';
+    document.getElementById('doc-analysis-placeholder').style.display = 'flex';
+    toast(`Analisi fallita: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🤖 Analizza';
+  }
+}
+
+function _renderAnalysisResults(result) {
+  document.getElementById('doc-analysis-loading').style.display = 'none';
+  document.getElementById('doc-analysis-output').style.display = 'flex';
+
+  // Summary
+  document.getElementById('doc-analysis-summary').textContent = result.summary || '—';
+
+  // Insights
+  const insights = result.insights || [];
+  const insightsWrap = document.getElementById('doc-insights-wrap');
+  if (insights.length) {
+    document.getElementById('doc-analysis-insights').innerHTML =
+      insights.map(i => `<li>${escHtml(i)}</li>`).join('');
+    insightsWrap.style.display = 'block';
+  } else {
+    insightsWrap.style.display = 'none';
+  }
+
+  // Items
+  _analysisItems = result.items || [];
+  const itemsWrap = document.getElementById('doc-items-wrap');
+  const itemsEl   = document.getElementById('doc-analysis-items');
+  if (_analysisItems.length) {
+    itemsEl.innerHTML = _analysisItems.map((item, i) => {
+      const isNote = item.type === 'note';
+      const typeLabel = isNote ? '📝 Nota / Todo' : '📊 Milestone';
+      const meta = [];
+      if (item.project) meta.push(`<span class="project-badge">${escHtml(item.project)}</span>`);
+      if (isNote) {
+        if (item.tags) meta.push(`<span class="tag">${escHtml(item.tags)}</span>`);
+        if (item.priority) meta.push(`<span class="priority priority-${item.priority}">${item.priority}</span>`);
+        if (item.status) meta.push(`<span class="status status-${item.status}">${item.status}</span>`);
+      } else {
+        if (item.start_date) meta.push(`<span style="font-size:0.68rem;color:var(--text-muted);">📅 ${item.start_date} → ${item.end_date || '?'}</span>`);
+      }
+      return `
+        <div class="doc-item-card selected" id="ditem-${i}" onclick="_toggleDocItem(${i})">
+          <input type="checkbox" checked onchange="_toggleDocItem(${i})" onclick="event.stopPropagation()" id="ditem-chk-${i}" style="accent-color:var(--accent);margin-top:3px;flex-shrink:0;">
+          <div class="doc-item-body">
+            <div class="doc-item-type">${typeLabel}</div>
+            <div class="doc-item-content">${escHtml(isNote ? item.content : item.name)}</div>
+            ${meta.length ? `<div class="doc-item-meta">${meta.join('')}</div>` : ''}
+          </div>
+        </div>`;
+    }).join('');
+    document.getElementById('doc-select-all').checked = true;
+    itemsWrap.style.display = 'block';
+  } else {
+    itemsWrap.style.display = 'none';
+  }
+}
+
+function _toggleDocItem(i) {
+  const chk  = document.getElementById(`ditem-chk-${i}`);
+  const card = document.getElementById(`ditem-${i}`);
+  chk.checked = !chk.checked;
+  card.classList.toggle('selected', chk.checked);
+}
+
+function docSelectAll(checked) {
+  _analysisItems.forEach((_, i) => {
+    const chk  = document.getElementById(`ditem-chk-${i}`);
+    const card = document.getElementById(`ditem-${i}`);
+    if (chk) { chk.checked = checked; card?.classList.toggle('selected', checked); }
+  });
+}
+
+async function createDocItems() {
+  const ctx = document.getElementById('ctx-label')?.textContent?.toLowerCase() || 'default';
+  const btn = document.getElementById('doc-create-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Creazione…';
+
+  let created = 0, skipped = 0;
+  const milestones = [];
+
+  for (let i = 0; i < _analysisItems.length; i++) {
+    const chk = document.getElementById(`ditem-chk-${i}`);
+    if (!chk?.checked) continue;
+    const item = _analysisItems[i];
+
+    if (item.type === 'note') {
+      try {
+        const res = await fetch(`/api/notes?ctx=${encodeURIComponent(ctx)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            content:  item.content,
+            tags:     item.tags || '',
+            project:  item.project || null,
+            priority: item.priority || 'medium',
+            status:   item.status || null,
+          }),
+        });
+        if (res.ok) created++;
+        else skipped++;
+      } catch { skipped++; }
+    } else if (item.type === 'milestone') {
+      milestones.push(item);
+    }
+  }
+
+  btn.disabled = false;
+  btn.textContent = '✓ Crea selezionati';
+
+  if (created) {
+    await loadNotes();
+    toast(`✓ ${created} element${created > 1 ? 'i creati' : 'e creato'}`, 'success');
+  }
+
+  if (milestones.length) {
+    const names = milestones.map(m => `• ${m.name} (${m.project})`).join('\n');
+    toast(`${milestones.length} milestone da creare manualmente nel Gantt:\n${names}`, '');
+    console.info('Milestone suggerite:', milestones);
+  }
+
+  if (skipped) toast(`${skipped} element${skipped > 1 ? 'i' : 'o'} non creato per errore`, 'error');
+}
 </script>
 </body>
 </html>

@@ -532,6 +532,169 @@ def _open_path(path: Path) -> None:
         subprocess.Popen(["explorer", str(path)])
 
 
+# ── Document listing ───────────────────────────────────────────────────────────
+
+@app.get("/api/docs")
+async def api_list_docs(request: Request):
+    ctx = _get_ctx(request)
+    with get_session() as session:
+        docs = crud.get_all_documents(session, ctx=ctx)
+    return [_doc_dict(d) for d in docs]
+
+
+# ── Document analysis ──────────────────────────────────────────────────────────
+
+def _extract_text(fp: Path, mime: str | None) -> tuple[str, str]:
+    """Return (text, mode) where mode is 'text' or 'image'."""
+    mime = mime or ""
+    suffix = fp.suffix.lower()
+
+    if mime.startswith("image/") or suffix in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
+        return ("", "image")
+
+    if mime == "application/pdf" or suffix == ".pdf":
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(str(fp))
+            text = "\n".join(p.extract_text() or "" for p in reader.pages)
+            return (text[:40_000], "text")
+        except Exception as e:
+            return (f"[Errore lettura PDF: {e}]", "text")
+
+    if suffix in (".docx",) or "wordprocessingml" in mime:
+        try:
+            from docx import Document as DocxDoc
+            doc = DocxDoc(str(fp))
+            text = "\n".join(p.text for p in doc.paragraphs)
+            return (text[:40_000], "text")
+        except Exception as e:
+            return (f"[Errore lettura DOCX: {e}]", "text")
+
+    # Fallback: plain text
+    try:
+        return (fp.read_text(errors="replace")[:40_000], "text")
+    except Exception:
+        return ("[Formato non supportato]", "text")
+
+
+_ANALYSIS_SYSTEM = """Sei un assistente che analizza documenti di lavoro e li trasforma in elementi strutturati per un'app di project management.
+Rispondi SEMPRE e SOLO con JSON valido, senza testo prima o dopo."""
+
+_ANALYSIS_USER = """Analizza questi documenti e fornisci un'analisi strutturata.
+
+{docs_block}
+
+Rispondi con questo JSON (tutti i campi obbligatori):
+{{
+  "summary": "riepilogo conciso in 3-5 frasi",
+  "insights": ["insight 1", "insight 2", ...],
+  "items": [
+    {{
+      "type": "note",
+      "content": "testo della nota/todo",
+      "project": "NOME_PROGETTO oppure null",
+      "tags": "tag1,tag2 oppure null",
+      "priority": "low|medium|high",
+      "status": "todo|backlog|wip|null"
+    }},
+    {{
+      "type": "milestone",
+      "name": "nome della milestone",
+      "project": "NOME_PROGETTO (obbligatorio)",
+      "start_date": "YYYY-MM-DD",
+      "end_date": "YYYY-MM-DD"
+    }}
+  ]
+}}
+
+Suggerisci solo elementi concreti e azionabili. Le date delle milestone devono essere realistiche a partire da oggi ({today})."""
+
+
+class AnalyzeDocsRequest(BaseModel):
+    doc_ids: list[int]
+    extra_instructions: Optional[str] = None
+
+
+@app.post("/api/analyze-docs")
+async def api_analyze_docs(request: Request, body: AnalyzeDocsRequest):
+    import base64, json as _json
+    from db.config import get_doc_root, get_model
+    from anthropic import Anthropic
+
+    if not body.doc_ids:
+        raise HTTPException(status_code=400, detail="Nessun documento selezionato")
+
+    doc_root = Path(get_doc_root()).expanduser()
+    client = Anthropic()
+    model = get_model()
+
+    with get_session() as session:
+        docs = [session.get(Document, did) for did in body.doc_ids]
+    docs = [d for d in docs if d]
+    if not docs:
+        raise HTTPException(status_code=404, detail="Documenti non trovati")
+
+    # Build message content — mix text blocks and image blocks
+    content_parts: list = []
+    docs_block_lines: list[str] = []
+
+    for doc in docs:
+        fp = doc_root / doc.rel_path
+        if not fp.is_file():
+            continue
+        text, mode = _extract_text(fp, doc.mime_type)
+        if mode == "image":
+            img_data = base64.standard_b64encode(fp.read_bytes()).decode()
+            media_type = doc.mime_type or "image/png"
+            if media_type not in ("image/jpeg", "image/png", "image/gif", "image/webp"):
+                media_type = "image/png"
+            content_parts.append({
+                "type": "text",
+                "text": f"--- Documento: {doc.orig_name} (immagine) ---"
+            })
+            content_parts.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": media_type, "data": img_data}
+            })
+        else:
+            docs_block_lines.append(
+                f"--- Documento: {doc.orig_name} ---\n{text or '[vuoto]'}"
+            )
+
+    from datetime import date as _date
+    today_str = _date.today().isoformat()
+
+    extra = f"\n\nIstruzioni aggiuntive: {body.extra_instructions}" if body.extra_instructions else ""
+    user_text = _ANALYSIS_USER.format(
+        docs_block="\n\n".join(docs_block_lines) or "[solo immagini]",
+        today=today_str,
+    ) + extra
+
+    content_parts.append({"type": "text", "text": user_text})
+
+    try:
+        response = client.messages.create(
+            model=model,
+            max_tokens=4096,
+            system=_ANALYSIS_SYSTEM,
+            messages=[{"role": "user", "content": content_parts}],
+        )
+        raw = response.content[0].text.strip()
+        # Strip markdown code fences if present
+        if raw.startswith("```"):
+            raw = raw.split("```", 2)[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.rsplit("```", 1)[0].strip()
+        result = _json.loads(raw)
+    except _json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail="Il modello non ha restituito JSON valido")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return result
+
+
 @app.get("/api/board")
 async def api_board(
     request: Request,
