@@ -64,3 +64,14 @@ class NoteDependency(SQLModel, table=True):
     note_id: int = Field(foreign_key="note.id")
     blocker_id: int = Field(foreign_key="note.id")
     created_at: datetime = Field(default_factory=datetime.now)
+
+
+class Document(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    note_id: Optional[int] = Field(default=None, foreign_key="note.id")
+    rel_path: str                      # relativo a doc_root configurato
+    orig_name: str
+    mime_type: Optional[str] = None
+    size_bytes: Optional[int] = None
+    sha256: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.now)

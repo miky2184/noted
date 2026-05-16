@@ -42,6 +42,16 @@ def _migrate():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(note_id, blocker_id)
             )""",
+            """CREATE TABLE IF NOT EXISTS document (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                note_id INTEGER REFERENCES note(id) ON DELETE SET NULL,
+                rel_path TEXT NOT NULL,
+                orig_name TEXT NOT NULL,
+                mime_type TEXT,
+                size_bytes INTEGER,
+                sha256 TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
         ]
         for sql in migrations:
             try:

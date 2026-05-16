@@ -146,6 +146,41 @@ Timeline visiva per pianificare progetti:
 - Selezione modello AI: ⚡ Haiku 4.5 · ✦ Sonnet 4.6 · ◆ Opus 4.7
 - **⏰ Recap automatico** — schedulazione giornaliera o settimanale con orario e giorni della settimana configurabili dalla UI
 
+### Gestione documenti
+
+Ogni nota può avere uno o più file allegati. I file non vengono salvati nel database: vengono organizzati automaticamente sul filesystem in una cartella dedicata. Nel DB viene conservato solo il puntatore al percorso.
+
+**Struttura cartelle:**
+
+```
+~/Documents/noted/           ← cartella root (configurabile)
+  work/                      ← contesto
+    ACME/                    ← progetto
+      20260516_contratto.pdf
+      20260518_specifica.docx
+    _inbox/                  ← note senza progetto
+      20260516_screenshot.png
+  home/
+    _inbox/
+      20260516_ricetta.pdf
+```
+
+**Come allegare un file:**
+
+- Dalla **tab Oggi**: pulsante 📎 nel form di aggiunta nota — seleziona uno o più file prima di inviare; vengono caricati automaticamente dopo la creazione della nota
+- Su **note esistenti**: pulsante 📎 dashed che appare all'hover sulla card della nota
+
+**Chip documento sulla card:**
+
+- Click sul chip → apre il file nell'app di default (Anteprima, Word, ecc.)
+- I chip mostrano icona tipo file + nome + dimensione
+
+**Impostazioni cartella documenti:**
+
+Nella sidebar (☰) → sezione **📁 Documenti**:
+- Campo per configurare la cartella root (default: `~/Documents/noted`)
+- Pulsante **📂 Apri cartella in Finder** per accedere direttamente ai file
+
 ### Backup e Ripristino
 
 Il bottone `⬇` in alto a destra apre un menu con le opzioni di export e import.

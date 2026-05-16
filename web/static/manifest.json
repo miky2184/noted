@@ -1,0 +1,15 @@
+{
+  "name": "noted",
+  "short_name": "noted",
+  "description": "Appunti giornalieri con recap AI",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d0f1a",
+  "theme_color": "#0d0f1a",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "/static/favicon.png", "sizes": "32x32",   "type": "image/png" },
+    { "src": "/static/logo.png",    "sizes": "512x512",  "type": "image/png", "purpose": "any maskable" },
+    { "src": "/static/logo-180.png","sizes": "180x180",  "type": "image/png" }
+  ]
+}

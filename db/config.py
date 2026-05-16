@@ -69,6 +69,18 @@ def set_scheduler_status(ok: bool, error: str | None = None) -> None:
     _save(data)
 
 
+def get_doc_root() -> str:
+    from pathlib import Path
+    default = str(Path.home() / "Documents" / "noted")
+    return _load().get("doc_root", default)
+
+
+def set_doc_root(path: str) -> None:
+    data = _load()
+    data["doc_root"] = path
+    _save(data)
+
+
 def set_schedule(time_str: str | None, days: list[int] | None, recap_type: str = "daily") -> None:
     data = _load()
     if time_str is None:

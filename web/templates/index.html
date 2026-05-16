@@ -6,7 +6,12 @@
 <title>noted — {{ today.strftime('%d/%m/%Y') }}</title>
 <link rel="icon" type="image/png" href="/static/favicon.png">
 <link rel="apple-touch-icon" href="/static/logo-180.png">
-<meta name="theme-color" content="#0d1033">
+<link rel="manifest" href="/static/manifest.json">
+<meta name="theme-color" content="#0d0f1a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="noted">
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 <style>
@@ -579,6 +584,149 @@
   .gantt-notes-row .gantt-row-label { font-size: 0.65rem; color: var(--text-dim); font-style: italic; }
   .gantt-notes-row .gantt-row-track { height: 24px; }
 
+  /* ── Mobile bottom nav + FAB (global, hidden on desktop) ─ */
+  .mobile-bottom-nav {
+    display: none;
+    position: fixed; bottom: 0; left: 0; right: 0;
+    height: 56px; background: var(--surface); border-top: 1px solid var(--border);
+    z-index: 200; grid-template-columns: repeat(4, 1fr);
+  }
+  .mobile-nav-btn {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 2px; border: none; background: none; cursor: pointer;
+    color: var(--text-muted); padding: 4px 0; transition: color 0.15s;
+    font-family: inherit;
+  }
+  .mobile-nav-btn.active { color: var(--accent); }
+  .mobile-nav-icon { font-size: 20px; line-height: 1; }
+  .mobile-nav-label { font-size: 0.58rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+  .mobile-fab {
+    display: none;
+    align-items: center; justify-content: center;
+    position: fixed; bottom: 72px; right: 16px;
+    width: 52px; height: 52px; border-radius: 50%;
+    background: var(--accent); color: #0d0f1a;
+    border: none; font-size: 28px; line-height: 1;
+    cursor: pointer; box-shadow: 0 4px 20px rgba(129,140,248,0.45);
+    z-index: 151; transition: transform 0.25s, box-shadow 0.2s;
+  }
+  .mobile-fab:active { box-shadow: 0 2px 10px rgba(129,140,248,0.3); }
+  .mobile-fab.open { transform: rotate(45deg); }
+  .sheet-backdrop {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.5); z-index: 149;
+  }
+  .sheet-backdrop.show { display: block; }
+
+  /* ── Mobile responsive ───────────────────────────────── */
+  @media (max-width: 768px) {
+    /* Header: streamlined */
+    .header { padding: 0 12px; gap: 8px; height: 52px; }
+    .header-logo-text span { display: none; }
+    .tabs, #backup-wrapper, .shortcuts-btn, .theme-btn,
+    .refresh-dot, #saving-dot, #pwa-refresh { display: none !important; }
+    .date-nav { margin-left: auto; gap: 4px; }
+    .date-nav .today-btn { display: none; }
+    .date-nav .current-date { font-size: 0.72rem; min-width: 70px; }
+    .date-nav button { width: 26px; height: 26px; }
+
+    /* Layout */
+    .layout { grid-template-columns: 1fr; height: calc(100dvh - 52px - 56px); }
+    .main { padding: 12px 14px 12px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+
+    /* Sidebar as drawer */
+    .sidebar { display: none; position: fixed; inset: 0; z-index: 250; overflow-y: auto; }
+    .sidebar.mobile-open { display: flex; }
+    .sidebar-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 249; }
+    .sidebar-backdrop.show { display: block; }
+    .sidebar-mobile-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+    .sidebar-mobile-close { background: none; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer; padding: 4px; line-height: 1; }
+
+    /* Add form → bottom sheet */
+    .add-form {
+      position: fixed !important;
+      bottom: 56px; left: 0; right: 0; margin: 0;
+      border-radius: 18px 18px 0 0;
+      border-left: none; border-right: none; border-bottom: none;
+      transform: translateY(calc(100% + 2px));
+      transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      z-index: 150; padding: 8px 16px 20px;
+      box-shadow: 0 -8px 32px rgba(0,0,0,0.45);
+    }
+    .add-form::before {
+      content: ''; display: block; width: 36px; height: 4px;
+      background: var(--border); border-radius: 2px; margin: 0 auto 12px;
+    }
+    .add-form.mobile-open { transform: translateY(0); }
+    .add-form textarea { font-size: 1rem; min-height: 80px; }
+    .add-form-footer { flex-wrap: wrap; gap: 8px; padding-top: 10px; }
+    .add-form input[type="text"] { width: calc(50% - 4px); flex: none; }
+    .add-btn { width: 100%; margin-left: 0; margin-top: 4px; padding: 10px; font-size: 0.9rem; }
+
+    /* Bottom nav visible */
+    .mobile-bottom-nav { display: grid !important; }
+
+    /* FAB visible */
+    .mobile-fab { display: flex !important; }
+
+    /* Toast above bottom nav */
+    #toast { bottom: 66px; }
+
+    /* Note cards: bigger touch targets */
+    .note-item { padding: 13px 14px; margin-bottom: 10px; }
+    .delete-btn { opacity: 0.5; font-size: 16px; padding: 4px 6px; }
+    .note-meta { gap: 6px; margin-bottom: 7px; }
+    .status, .priority { padding: 3px 8px; font-size: 0.7rem; }
+
+    /* Board: horizontal scroll */
+    .board-container { grid-template-columns: repeat(7, min(220px, 78vw)); overflow-x: auto; padding-bottom: 8px; }
+    .board-col { max-height: calc(100dvh - 185px); }
+    .board-filters { gap: 6px; }
+
+    /* Due items */
+    .due-item { padding: 12px 13px; }
+
+    /* Gantt: stack panel above chart */
+    .gantt-layout { flex-direction: column; }
+    .gantt-panel { width: 100%; max-height: 240px; border-right: none; border-bottom: 1px solid var(--border); }
+    .gantt-chart-area { padding: 14px; }
+
+    /* Misc */
+    .voice-modal { min-width: unset; width: 90vw; }
+    .modal { min-width: unset; width: 90vw; }
+  }
+  @media (min-width: 769px) {
+    .sidebar-mobile-header { display: none; }
+    .sidebar-backdrop { display: none !important; }
+    #sidebar-toggle { display: none; }
+    #pwa-refresh { display: none !important; }
+  }
+
+  /* Pull-to-refresh */
+  #ptr-indicator {
+    position: fixed; top: 52px; left: 50%; transform: translateX(-50%) translateY(-60px);
+    background: var(--surface); border: 1px solid var(--border); border-radius: 20px;
+    padding: 6px 14px; font-size: 0.75rem; color: var(--text-muted);
+    display: flex; align-items: center; gap: 6px; z-index: 500;
+    transition: transform 0.2s, opacity 0.2s; opacity: 0; pointer-events: none;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  }
+  #ptr-indicator.visible { opacity: 1; }
+  #ptr-indicator.ready { color: var(--accent); border-color: var(--accent); }
+  #ptr-indicator .ptr-spinner { width: 12px; height: 12px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; }
+  #ptr-indicator .ptr-spinner.spin { animation: spin 0.6s linear infinite; }
+  #pwa-refresh {
+    background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted);
+    width: 28px; height: 28px; border-radius: 6px; cursor: pointer; font-size: 14px;
+    display: flex; align-items: center; justify-content: center; transition: all 0.15s;
+  }
+  #pwa-refresh:hover { border-color: var(--border-hover); color: var(--text); }
+  #pwa-refresh.spinning { animation: spin 0.6s linear infinite; }
+  #sidebar-toggle { background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); width: 28px; height: 28px; border-radius: 6px; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+  #sidebar-toggle:hover { border-color: var(--border-hover); color: var(--text); }
+  .ip-btn { background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); border-radius: 6px; padding: 0 8px; height: 28px; cursor: pointer; font-size: 0.68rem; font-family: monospace; transition: all 0.15s; white-space: nowrap; display: flex; align-items: center; gap: 4px; }
+  .ip-btn:hover { border-color: var(--accent); color: var(--accent); }
+
   /* ── Voice input ─────────────────────────────────────── */
   .mic-btn {
     background: none; border: 1px solid var(--border); border-radius: 6px;
@@ -624,9 +772,37 @@
   .voice-btn-secondary:hover { color: var(--text); border-color: var(--border-hover); }
   .voice-btn-danger { background: rgba(248,113,113,0.12); color: var(--red); border: 1px solid rgba(248,113,113,0.3); }
   .voice-btn-danger:hover { background: rgba(248,113,113,0.2); }
+
+  /* ── Attach btn ──────────────────────────────────────────── */
+  .attach-btn {
+    background: none; border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text-muted); cursor: pointer; padding: 4px 8px;
+    font-size: 15px; line-height: 1; transition: all 0.15s;
+  }
+  .attach-btn:hover { border-color: var(--accent); color: var(--accent); }
+  #attach-preview { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .attach-chip {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
+    padding: 2px 8px 2px 6px; font-size: 0.72rem;
+    display: inline-flex; align-items: center; gap: 4px;
+    max-width: 160px; overflow: hidden;
+  }
+
+  /* ── Doc chips on note cards ─────────────────────────────── */
+  .note-docs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .doc-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 6px; background: var(--surface); border: 1px solid var(--border); font-size: 0.72rem; color: var(--text-muted); cursor: pointer; transition: all 0.15s; max-width: 180px; overflow: hidden; white-space: nowrap; }
+  .doc-chip:hover { border-color: var(--accent); color: var(--accent); }
+  .doc-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .doc-chip-size { color: var(--text-dim); font-size: 0.65rem; flex-shrink: 0; }
+  .doc-chip-add { border-style: dashed; opacity: 0; transition: opacity 0.15s; }
+  .note-item:hover .doc-chip-add { opacity: 1; }
+  .doc-chip-add-hidden { opacity: 0; }
+  .note-item:hover .doc-chip-add-hidden { opacity: 0.6; }
 </style>
 </head>
 <body>
+
+<div id="ptr-indicator"><div class="ptr-spinner"></div><span>Rilascia per aggiornare</span></div>
 
 <div class="header">
   <a class="header-logo" href="/" title="noted">
@@ -704,9 +880,35 @@
 
   <div class="refresh-dot" id="refresh-dot" title="Auto-refresh attivo"></div>
   <div id="saving-dot" title="Salvataggio in corso…"></div>
+  <button class="ip-btn" id="ip-btn" onclick="copyLocalUrl()" title="Copia URL per accesso mobile" style="display:none;">📱 …</button>
+  <button id="pwa-refresh" onclick="pwaRefresh()" title="Aggiorna">↻</button>
   <button class="shortcuts-btn" id="shortcuts-btn" onclick="toggleShortcuts()" title="Scorciatoie da tastiera (?)">?</button>
   <button class="theme-btn" id="theme-toggle" title="Cambia tema">🌙</button>
+  <button id="sidebar-toggle" onclick="toggleMobileSidebar()" title="Recap e impostazioni">☰</button>
 </div>
+
+<div class="sidebar-backdrop" id="sidebar-backdrop" onclick="closeMobileSidebar()"></div>
+
+<div class="sheet-backdrop" id="sheet-backdrop" onclick="closeNoteSheet()"></div>
+<button class="mobile-fab" id="mobile-fab" onclick="toggleNoteSheet()" title="Aggiungi nota">+</button>
+<nav class="mobile-bottom-nav" id="mobile-bottom-nav">
+  <button class="mobile-nav-btn active" id="mnav-notes" onclick="switchTab('notes')">
+    <span class="mobile-nav-icon">📝</span>
+    <span class="mobile-nav-label">Oggi</span>
+  </button>
+  <button class="mobile-nav-btn" id="mnav-board" onclick="switchTab('board')">
+    <span class="mobile-nav-icon">🗂</span>
+    <span class="mobile-nav-label">Board</span>
+  </button>
+  <button class="mobile-nav-btn" id="mnav-due" onclick="switchTab('due')">
+    <span class="mobile-nav-icon">📅</span>
+    <span class="mobile-nav-label">Scadenze</span>
+  </button>
+  <button class="mobile-nav-btn" id="mnav-gantt" onclick="switchTab('gantt')">
+    <span class="mobile-nav-icon">📊</span>
+    <span class="mobile-nav-label">Gantt</span>
+  </button>
+</nav>
 
 <div class="layout">
   <div class="main" id="main-area">
@@ -735,8 +937,11 @@
           <option value="medium" selected>● medium</option>
           <option value="high">▲ high</option>
         </select>
+        <input type="file" id="attach-input" multiple style="display:none">
+        <button type="button" class="attach-btn" id="attach-btn" onclick="document.getElementById('attach-input').click()" title="Allega file">📎</button>
         <button type="submit" class="add-btn" id="add-btn">+ Aggiungi</button>
       </div>
+      <div id="attach-preview"></div>
     </form>
 
     <!-- Filters -->
@@ -805,7 +1010,11 @@
     </div>
   </div>
 
-  <div class="sidebar">
+  <div class="sidebar" id="sidebar">
+    <div class="sidebar-mobile-header">
+      <span style="font-size:0.8rem;font-weight:700;color:var(--text);">Recap & Impostazioni</span>
+      <button class="sidebar-mobile-close" onclick="closeMobileSidebar()">✕</button>
+    </div>
     <div class="sidebar-section" style="padding-top:12px;padding-bottom:12px;">
       <div style="display:flex;align-items:center;gap:8px;">
         <span class="section-title">Modello AI</span>
@@ -872,6 +1081,20 @@
         {% else %}
           <div class="no-recap">Nessun recap salvato.<br>Clicca <strong>Daily</strong> per generarne uno.</div>
         {% endif %}
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="section-header"><span class="section-title">📁 Documenti</span></div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <label style="font-size:0.75rem;color:var(--text-muted);">Cartella documenti</label>
+        <div style="display:flex;gap:6px;">
+          <input type="text" id="doc-root-input" placeholder="~/Documents/noted"
+                 style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:0.78rem;padding:5px 8px;outline:none;"
+                 onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
+          <button onclick="saveDocRoot()" style="background:var(--accent);color:#0d0f1a;border:none;border-radius:6px;padding:5px 12px;font-size:0.78rem;font-weight:700;cursor:pointer;">Salva</button>
+        </div>
+        <button onclick="openDocFolder()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:0.75rem;color:var(--text-muted);cursor:pointer;text-align:left;transition:all 0.15s;" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-muted)'">📂 Apri cartella in Finder</button>
       </div>
     </div>
 
@@ -1227,26 +1450,67 @@ document.getElementById('theme-toggle').addEventListener('click', () => {
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 function switchTab(tab) {
   activeTab = tab;
+  const isMobile = window.innerWidth <= 768;
+
   ['notes', 'board', 'due', 'gantt'].forEach(t => {
     document.getElementById(`tab-${t}`).classList.toggle('active', t === tab);
+    const mb = document.getElementById(`mnav-${t}`);
+    if (mb) mb.classList.toggle('active', t === tab);
   });
+
   document.getElementById('view-notes').style.display = tab === 'notes' ? 'block' : 'none';
   document.getElementById('view-board').style.display = tab === 'board' ? 'block' : 'none';
   document.getElementById('view-due').style.display = tab === 'due' ? 'block' : 'none';
   document.getElementById('view-gantt').style.display = tab === 'gantt' ? 'block' : 'none';
   document.getElementById('date-nav').style.display = tab === 'notes' ? '' : 'none';
-  document.getElementById('add-form').style.display = (tab === 'notes' && isToday(currentDate)) ? '' : 'none';
   document.getElementById('filter-bar').style.display = 'none';
+
+  if (isMobile) {
+    const showFab = tab === 'notes' && isToday(currentDate);
+    const fab = document.getElementById('mobile-fab');
+    if (fab) fab.style.display = showFab ? 'flex' : 'none';
+    if (!showFab) closeNoteSheet();
+  } else {
+    document.getElementById('add-form').style.display = (tab === 'notes' && isToday(currentDate)) ? '' : 'none';
+  }
+
   if (tab === 'gantt') {
-    document.querySelector('.sidebar').style.display = 'none';
-    document.querySelector('.layout').style.gridTemplateColumns = '1fr';
+    if (!isMobile) {
+      document.querySelector('.sidebar').style.display = 'none';
+      document.querySelector('.layout').style.gridTemplateColumns = '1fr';
+    }
     loadGantt();
   } else {
-    document.querySelector('.sidebar').style.display = '';
-    document.querySelector('.layout').style.gridTemplateColumns = '1fr 360px';
+    if (!isMobile) {
+      document.querySelector('.sidebar').style.display = '';
+      document.querySelector('.layout').style.gridTemplateColumns = '1fr 360px';
+    }
   }
   if (tab === 'due') loadDueNotes();
   if (tab === 'board') loadBoard();
+}
+
+// ── Note bottom sheet (mobile) ────────────────────────────────────────────────
+function openNoteSheet() {
+  document.getElementById('add-form').classList.add('mobile-open');
+  document.getElementById('sheet-backdrop').classList.add('show');
+  document.getElementById('mobile-fab').classList.add('open');
+  setTimeout(() => document.getElementById('note-input')?.focus(), 320);
+}
+
+function closeNoteSheet() {
+  document.getElementById('add-form').classList.remove('mobile-open');
+  document.getElementById('sheet-backdrop').classList.remove('show');
+  const fab = document.getElementById('mobile-fab');
+  if (fab) fab.classList.remove('open');
+}
+
+function toggleNoteSheet() {
+  if (document.getElementById('add-form').classList.contains('mobile-open')) {
+    closeNoteSheet();
+  } else {
+    openNoteSheet();
+  }
 }
 
 // ── Markdown recap init ───────────────────────────────────────────────────────
@@ -1349,7 +1613,15 @@ function navigateToDate(isoDate) {
   document.getElementById('current-date-label').textContent = formatDateLabel(isoDate);
   document.getElementById('notes-section-label').textContent =
     isToday(isoDate) ? 'Note di oggi' : `Note del ${formatDateLabel(isoDate)}`;
-  document.getElementById('add-form').style.display = isToday(isoDate) ? '' : 'none';
+  const isMobile = window.innerWidth <= 768;
+  if (isMobile) {
+    const showFab = isToday(isoDate);
+    const fab = document.getElementById('mobile-fab');
+    if (fab) fab.style.display = showFab ? 'flex' : 'none';
+    if (!showFab) closeNoteSheet();
+  } else {
+    document.getElementById('add-form').style.display = isToday(isoDate) ? '' : 'none';
+  }
   loadNotes();
   resetRefresh();
 }
@@ -1437,6 +1709,18 @@ function renderNotes(notes) {
         <span class="dep-chip add-dep" onclick="toggleDepsPanel(${n.id})" title="Gestisci dipendenze">+ dipendenza</span>
       </div>
       <div class="deps-panel" id="deps-panel-${n.id}"></div>
+      ${n.docs && n.docs.length ? `
+        <div class="note-docs">
+          ${n.docs.map(d => `
+            <button class="doc-chip" onclick="openDoc(${d.id})" title="${escHtml(d.orig_name)}">
+              ${_fileIcon(d.mime_type, d.orig_name)}
+              <span>${escHtml(d.orig_name)}</span>
+              <span class="doc-chip-size">${_fmtSize(d.size_bytes)}</span>
+            </button>
+          `).join('')}
+          <button class="doc-chip doc-chip-add" onclick="attachToNote(${n.id})" title="Allega file">📎</button>
+        </div>
+      ` : `<button class="doc-chip doc-chip-add doc-chip-add-hidden" onclick="attachToNote(${n.id})" title="Allega file">📎</button>`}
     </div>`;
   }).join('');
 }
@@ -1498,6 +1782,7 @@ document.getElementById('add-form').addEventListener('submit', async e => {
       })
     });
     if (!res.ok) throw new Error();
+    const newNote = await res.json();
     textarea.value = '';
     textarea.style.height = 'auto';
     document.getElementById('note-tag').value = '';
@@ -1506,7 +1791,9 @@ document.getElementById('add-form').addEventListener('submit', async e => {
     document.getElementById('note-due').value = '';
     document.getElementById('note-priority').value = 'medium';
     document.getElementById('note-status').value = '';
+    if (_pendingFiles.length) await _uploadPendingFiles(newNote.id);
     await loadNotes();
+    if (window.innerWidth <= 768) closeNoteSheet();
   } catch {
     toast('Errore nel salvataggio', 'error');
   } finally {
@@ -2626,9 +2913,171 @@ async function removeDep(noteId, blockerId) {
   await refreshDepsPanel(noteId);
 }
 
+// ── Mobile sidebar ────────────────────────────────────────────────────────────
+function toggleMobileSidebar() {
+  document.getElementById('sidebar').classList.toggle('mobile-open');
+  document.getElementById('sidebar-backdrop').classList.toggle('show');
+}
+function closeMobileSidebar() {
+  document.getElementById('sidebar').classList.remove('mobile-open');
+  document.getElementById('sidebar-backdrop').classList.remove('show');
+}
+
+// ── Local IP button ───────────────────────────────────────────────────────────
+async function _loadLocalIp() {
+  try {
+    const res = await fetch('/api/local-ip');
+    const { url, ip } = await res.json();
+    if (ip === '127.0.0.1') return;
+    const btn = document.getElementById('ip-btn');
+    btn.textContent = `📱 ${ip}`;
+    btn.style.display = '';
+    btn._url = url;
+  } catch {}
+}
+async function copyLocalUrl() {
+  const btn = document.getElementById('ip-btn');
+  const url = btn._url;
+  if (!url) return;
+  try {
+    await navigator.clipboard.writeText(url);
+    const orig = btn.textContent;
+    btn.textContent = '✓ Copiato!';
+    setTimeout(() => { btn.textContent = orig; }, 1500);
+  } catch {
+    toast(url, 'success');
+  }
+}
+
+// ── Service Worker ────────────────────────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/static/sw.js').catch(() => {});
+}
+
+// ── Documents ─────────────────────────────────────────────────────────────────
+function _fileIcon(mime, name) {
+  if (!mime) mime = '';
+  if (mime.startsWith('image/')) return '🖼';
+  if (mime === 'application/pdf') return '📄';
+  if (mime.startsWith('application/vnd.openxmlformats') || mime === 'application/msword') return '📝';
+  if (mime.startsWith('video/')) return '🎥';
+  if (mime.startsWith('audio/')) return '🎵';
+  if (mime === 'application/zip' || mime === 'application/x-tar') return '📦';
+  return '📎';
+}
+
+function _fmtSize(bytes) {
+  if (!bytes) return '';
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024*1024) return `${(bytes/1024).toFixed(0)}KB`;
+  return `${(bytes/1024/1024).toFixed(1)}MB`;
+}
+
+async function openDoc(docId) {
+  try {
+    await fetch(`/api/docs/${docId}/open`, { method: 'POST' });
+  } catch { toast('Impossibile aprire il file', 'error'); }
+}
+
+// Pending files for new note form
+let _pendingFiles = [];
+
+document.getElementById('attach-input').addEventListener('change', e => {
+  _pendingFiles = [..._pendingFiles, ...Array.from(e.target.files)];
+  e.target.value = '';
+  _renderAttachPreview();
+});
+
+function _renderAttachPreview() {
+  const el = document.getElementById('attach-preview');
+  if (!el) return;
+  el.innerHTML = _pendingFiles.map((f, i) => `
+    <span class="attach-chip">
+      ${_fileIcon(f.type, f.name)}
+      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(f.name)}</span>
+      <button type="button" onclick="_removeAttach(${i})" style="background:none;border:none;cursor:pointer;color:var(--text-dim);padding:0;font-size:11px;flex-shrink:0;">×</button>
+    </span>
+  `).join('');
+}
+
+function _removeAttach(i) {
+  _pendingFiles.splice(i, 1);
+  _renderAttachPreview();
+}
+
+async function _uploadPendingFiles(noteId) {
+  for (const f of _pendingFiles) {
+    const fd = new FormData();
+    fd.append('file', f);
+    try {
+      await fetch(`/api/notes/${noteId}/docs`, { method: 'POST', body: fd });
+    } catch { /* silently skip */ }
+  }
+  _pendingFiles = [];
+  _renderAttachPreview();
+}
+
+// Input file nascosto per allegare a note esistenti
+let _attachTargetNoteId = null;
+const _attachExistingInput = document.createElement('input');
+_attachExistingInput.type = 'file';
+_attachExistingInput.multiple = true;
+_attachExistingInput.style.display = 'none';
+document.body.appendChild(_attachExistingInput);
+_attachExistingInput.addEventListener('change', async e => {
+  const files = Array.from(e.target.files);
+  e.target.value = '';
+  if (!_attachTargetNoteId || !files.length) return;
+  for (const f of files) {
+    const fd = new FormData();
+    fd.append('file', f);
+    try {
+      await fetch(`/api/notes/${_attachTargetNoteId}/docs`, { method: 'POST', body: fd });
+    } catch { toast('Upload fallito', 'error'); }
+  }
+  await loadNotes();
+  toast('File allegato', 'success');
+});
+
+function attachToNote(noteId) {
+  _attachTargetNoteId = noteId;
+  _attachExistingInput.click();
+}
+
+// ── Settings: doc_root ────────────────────────────────────────────────────────
+async function loadDocRoot() {
+  try {
+    const r = await fetch('/api/settings');
+    const s = await r.json();
+    const inp = document.getElementById('doc-root-input');
+    if (inp && s.doc_root) inp.value = s.doc_root;
+  } catch {}
+}
+
+async function saveDocRoot() {
+  const val = document.getElementById('doc-root-input')?.value?.trim();
+  if (!val) return;
+  try {
+    await fetch('/api/settings', {
+      method: 'PATCH',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ doc_root: val })
+    });
+    toast('Cartella salvata', 'success');
+  } catch { toast('Errore', 'error'); }
+}
+
+async function openDocFolder() {
+  try {
+    await fetch('/api/docs/open-folder-root', { method: 'POST' });
+  } catch { toast('Impossibile aprire la cartella', 'error'); }
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadNotes();
 resetRefresh();
+_loadLocalIp();
+loadDocRoot();
 
 // ── Voice input ───────────────────────────────────────────────────────────────
 let _mediaRecorder = null;
@@ -2738,6 +3187,59 @@ function closeVoiceModal(e) {
     _closeVoiceModal();
   }
 }
+
+// ── PWA refresh ───────────────────────────────────────────────────────────────
+function pwaRefresh() {
+  const btn = document.getElementById('pwa-refresh');
+  btn.classList.add('spinning');
+  const tab = document.getElementById('tab-notes')?.classList.contains('active') ? 'notes'
+    : document.getElementById('tab-board')?.classList.contains('active') ? 'board'
+    : document.getElementById('tab-due')?.classList.contains('active') ? 'due'
+    : document.getElementById('tab-gantt')?.classList.contains('active') ? 'gantt'
+    : 'notes';
+  const done = () => btn.classList.remove('spinning');
+  if (tab === 'notes') loadNotes().finally(done);
+  else if (tab === 'board') { renderBoard(); done(); }
+  else if (tab === 'due') { renderDue(); done(); }
+  else if (tab === 'gantt') { renderGantt(); done(); }
+  else done();
+}
+
+// Pull-to-refresh
+(function () {
+  const THRESHOLD = 80;
+  let startY = 0, pulling = false, reached = false;
+  const ind = document.getElementById('ptr-indicator');
+  const spin = ind.querySelector('.ptr-spinner');
+
+  document.addEventListener('touchstart', e => {
+    if (window.scrollY === 0 && e.touches.length === 1) {
+      startY = e.touches[0].clientY;
+      pulling = true;
+      reached = false;
+    }
+  }, { passive: true });
+
+  document.addEventListener('touchmove', e => {
+    if (!pulling) return;
+    const dy = e.touches[0].clientY - startY;
+    if (dy <= 0) { pulling = false; return; }
+    const pct = Math.min(dy / THRESHOLD, 1);
+    ind.style.transform = `translateX(-50%) translateY(${-60 + pct * 70}px)`;
+    ind.classList.toggle('visible', dy > 20);
+    if (dy >= THRESHOLD && !reached) { reached = true; ind.classList.add('ready'); spin.classList.add('spin'); }
+    if (dy < THRESHOLD && reached) { reached = false; ind.classList.remove('ready'); spin.classList.remove('spin'); }
+  }, { passive: true });
+
+  document.addEventListener('touchend', () => {
+    if (!pulling) return;
+    pulling = false;
+    ind.style.transform = '';
+    ind.classList.remove('visible', 'ready');
+    spin.classList.remove('spin');
+    if (reached) pwaRefresh();
+  });
+})();
 </script>
 </body>
 </html>

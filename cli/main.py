@@ -341,7 +341,7 @@ def delete_recap(
 
 @app.command()
 def web(
-    host: str = typer.Option("127.0.0.1", help="Host"),
+    host: str = typer.Option("0.0.0.0", help="Host"),
     port: Optional[int] = typer.Option(None, help="Porta (default: dalla config, 7979)"),
 ):
     """Avvia la dashboard web."""
@@ -390,28 +390,58 @@ def setup_https():
         console.print(f"[red]mkcert -install fallito:[/red]\n{r.stderr.strip()}")
         raise typer.Exit(1)
 
-    # 2. Genera il certificato per noted.local
-    out_dir = config_dir()
+    # 2. Rileva IP locale
+    import socket
+    try:
+        local_ip = socket.gethostbyname(socket.gethostname())
+        # fallback più affidabile
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+    except Exception:
+        local_ip = "127.0.0.1"
+
+    # 3. Genera il certificato per noted.local + IP locale
     cert_file = cert_path()
     key_file = key_path()
-    console.print(f"[cyan]Genero il certificato per noted.local…[/cyan]")
+    console.print(f"[cyan]Genero il certificato per noted.local e {local_ip}…[/cyan]")
     r = subprocess.run(
         [mkcert,
          "-cert-file", str(cert_file),
          "-key-file",  str(key_file),
-         "noted.local", "127.0.0.1", "localhost"],
+         "noted.local", "127.0.0.1", "localhost", local_ip],
         capture_output=True, text=True,
     )
     if r.returncode != 0:
         console.print(f"[red]Generazione certificato fallita:[/red]\n{r.stderr.strip()}")
         raise typer.Exit(1)
 
+    # 4. Mostra CA per installazione su smartphone
+    ca_result = subprocess.run([mkcert, "-CAROOT"], capture_output=True, text=True)
+    ca_root = ca_result.stdout.strip()
+
     console.print("✅ [green]Certificato creato e fidato dal browser.[/green]")
     console.print(f"[dim]  {cert_file}[/dim]")
     console.print(f"[dim]  {key_file}[/dim]")
-    console.print("\n[bold]Prossimi passi:[/bold]")
-    console.print("  1. noted restart   [dim]# riavvia il servizio in modalità HTTPS[/dim]")
-    console.print("  2. Apri [link]https://noted.local:7979[/link]")
+    console.print("\n[bold]Accesso da Mac:[/bold]")
+    console.print(f"  https://noted.local:7979")
+    console.print(f"\n[bold]Accesso da smartphone (stessa WiFi):[/bold]")
+    console.print(f"  https://{local_ip}:7979")
+    console.print(f"\n[bold yellow]Per fidarsi del certificato su iOS:[/bold yellow]")
+    console.print(f"  1. Apri [link]https://{local_ip}:7979/static/mkcert-ca.crt[/link] dal telefono")
+    console.print(f"  2. Installa il profilo (Impostazioni → Generale → VPN e Gestione Dispositivo)")
+    console.print(f"  3. Abilita la fiducia (Impostazioni → Generali → Info → Impostazioni Fiducia Certificato)")
+
+    # Copia la CA root negli static per renderla scaricabile dal telefono
+    import shutil as _shutil
+    ca_file = Path(ca_root) / "rootCA.pem"
+    if ca_file.exists():
+        dest = Path(__file__).parent.parent / "web" / "static" / "mkcert-ca.crt"
+        _shutil.copy(ca_file, dest)
+        console.print(f"\n[dim]CA copiata in {dest}[/dim]")
+
+    console.print(f"\n[bold]Prossimi passi:[/bold]")
+    console.print("  noted restart")
 
 
 # ── SET-MODEL ──────────────────────────────────────────────────────────────────

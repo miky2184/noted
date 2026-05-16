@@ -2,7 +2,7 @@ from datetime import date, datetime, timedelta
 from typing import Optional
 from sqlmodel import Session, select
 from sqlalchemy import or_, delete as sa_delete
-from db.models import Note, Recap, GanttProject, Milestone, Context, NoteDependency
+from db.models import Note, Recap, GanttProject, Milestone, Context, NoteDependency, Document
 
 
 # ── Context ────────────────────────────────────────────────────────────────────
@@ -406,6 +406,43 @@ def get_deps_bulk(session: Session, note_ids: list[int]) -> dict:
                 for rid in data["blocking"] if rid in ref_notes
             ]
     return result
+
+
+# ── Documents ─────────────────────────────────────────────────────────────────
+
+def add_document(session: Session, note_id: Optional[int], rel_path: str, orig_name: str,
+                 mime_type: Optional[str] = None, size_bytes: Optional[int] = None,
+                 sha256: Optional[str] = None) -> Document:
+    doc = Document(note_id=note_id, rel_path=rel_path, orig_name=orig_name,
+                   mime_type=mime_type, size_bytes=size_bytes, sha256=sha256)
+    session.add(doc)
+    session.commit()
+    session.refresh(doc)
+    return doc
+
+
+def get_docs_for_note(session: Session, note_id: int) -> list[Document]:
+    return session.exec(select(Document).where(Document.note_id == note_id)).all()
+
+
+def get_docs_bulk(session: Session, note_ids: list[int]) -> dict[int, list]:
+    if not note_ids:
+        return {}
+    docs = session.exec(select(Document).where(Document.note_id.in_(note_ids))).all()
+    result: dict[int, list] = {nid: [] for nid in note_ids}
+    for d in docs:
+        if d.note_id in result:
+            result[d.note_id].append(d)
+    return result
+
+
+def delete_document(session: Session, doc_id: int) -> Optional[Document]:
+    doc = session.get(Document, doc_id)
+    if not doc:
+        return None
+    session.delete(doc)
+    session.commit()
+    return doc
 
 
 # ── Gantt ──────────────────────────────────────────────────────────────────────

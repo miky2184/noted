@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from db.engine import init_db, get_session, engine
 from db import crud
+from db.models import Document
 
 
 def _do_scheduled_recap():
@@ -120,6 +121,17 @@ def _note_dict(n):
         "created_at": n.created_at.isoformat(),
     }
 
+def _doc_dict(d):
+    return {
+        "id": d.id,
+        "note_id": d.note_id,
+        "rel_path": d.rel_path,
+        "orig_name": d.orig_name,
+        "mime_type": d.mime_type,
+        "size_bytes": d.size_bytes,
+        "created_at": d.created_at.isoformat(),
+    }
+
 def _get_ctx(request: Request) -> str:
     return request.query_params.get("ctx", "default")
 
@@ -207,12 +219,14 @@ async def api_notes(
                                assignee=assignee, status=status, ctx=ctx)
         note_ids = [n.id for n in notes]
         deps = crud.get_deps_bulk(session, note_ids)
+        docs_map = crud.get_docs_bulk(session, note_ids)
     result = []
     for n in notes:
         d = _note_dict(n)
         nd = deps.get(n.id, {})
         d["blockers"] = nd.get("blocker_notes", [])
         d["blocking"] = nd.get("blocking_notes", [])
+        d["docs"] = [_doc_dict(doc) for doc in docs_map.get(n.id, [])]
         result.append(d)
     return result
 
@@ -361,6 +375,161 @@ async def api_remove_dep(note_id: int, blocker_id: int, request: Request):
         if not note or note.context != ctx:
             raise HTTPException(status_code=404, detail="Nota non trovata")
         crud.remove_dependency(session, note_id, blocker_id)
+
+
+# ── Settings ──────────────────────────────────────────────────────────────────
+
+@app.get("/api/settings")
+async def api_get_settings():
+    from db.config import get_doc_root
+    return {"doc_root": get_doc_root()}
+
+
+class SettingsUpdate(BaseModel):
+    doc_root: Optional[str] = None
+
+
+@app.patch("/api/settings", status_code=200)
+async def api_update_settings(body: SettingsUpdate):
+    from db.config import set_doc_root
+    if body.doc_root is not None:
+        set_doc_root(body.doc_root.strip())
+    return {"ok": True}
+
+
+# ── Documents ─────────────────────────────────────────────────────────────────
+
+@app.post("/api/notes/{note_id}/docs", status_code=201)
+async def api_upload_doc(note_id: int, file: UploadFile = File(...)):
+    import hashlib, mimetypes, re
+    from db.config import get_doc_root
+
+    with get_session() as session:
+        note = session.get(crud.Note, note_id)
+        if not note:
+            raise HTTPException(status_code=404, detail="Nota non trovata")
+        project = note.project
+        ctx = note.context or "default"
+
+    doc_root = Path(get_doc_root()).expanduser()
+
+    ctx_slug  = re.sub(r'[^a-z0-9\-]', '_', ctx.lower()).strip('_') or 'default'
+    proj_slug = re.sub(r'[^a-z0-9\-]', '_', (project or '').lower()).strip('_') or '_inbox'
+
+    today_str = date.today().strftime('%Y%m%d')
+    safe_name = re.sub(r'[^\w.\- ]', '_', file.filename or 'file')
+
+    dest_dir = doc_root / ctx_slug / proj_slug
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    content = await file.read()
+    sha256 = hashlib.sha256(content).hexdigest()
+
+    dest_name = f"{today_str}_{safe_name}"
+    dest_path = dest_dir / dest_name
+    if dest_path.exists():
+        stem = Path(safe_name).stem
+        suffix = Path(safe_name).suffix
+        dest_name = f"{today_str}_{stem}_{sha256[:6]}{suffix}"
+        dest_path = dest_dir / dest_name
+
+    dest_path.write_bytes(content)
+
+    rel_path = f"{ctx_slug}/{proj_slug}/{dest_name}"
+    mime = file.content_type or mimetypes.guess_type(file.filename or "")[0]
+
+    with get_session() as session:
+        doc = crud.add_document(session, note_id=note_id, rel_path=rel_path,
+                                orig_name=file.filename or safe_name,
+                                mime_type=mime, size_bytes=len(content), sha256=sha256)
+    return _doc_dict(doc)
+
+
+@app.get("/api/notes/{note_id}/docs")
+async def api_get_docs(note_id: int):
+    with get_session() as session:
+        docs = crud.get_docs_for_note(session, note_id)
+    return [_doc_dict(d) for d in docs]
+
+
+@app.delete("/api/docs/{doc_id}", status_code=204)
+async def api_delete_doc(doc_id: int, remove_file: bool = False):
+    from db.config import get_doc_root
+    with get_session() as session:
+        doc = crud.delete_document(session, doc_id)
+    if not doc:
+        raise HTTPException(status_code=404)
+    if remove_file:
+        fp = Path(get_doc_root()).expanduser() / doc.rel_path
+        if fp.is_file():
+            fp.unlink()
+
+
+@app.post("/api/docs/{doc_id}/open")
+async def api_open_doc(doc_id: int):
+    import subprocess
+    from db.config import get_doc_root
+    with get_session() as session:
+        doc = session.get(Document, doc_id)
+    if not doc:
+        raise HTTPException(status_code=404)
+    fp = Path(get_doc_root()).expanduser() / doc.rel_path
+    if not fp.is_file():
+        raise HTTPException(status_code=404, detail="File non trovato sul disco")
+    _open_path(fp)
+    return {"ok": True}
+
+
+@app.post("/api/docs/{doc_id}/open-folder")
+async def api_open_doc_folder(doc_id: int):
+    from db.config import get_doc_root
+    with get_session() as session:
+        doc = session.get(Document, doc_id)
+    if not doc:
+        raise HTTPException(status_code=404)
+    folder = (Path(get_doc_root()).expanduser() / doc.rel_path).parent
+    folder.mkdir(parents=True, exist_ok=True)
+    _open_path(folder)
+    return {"ok": True}
+
+
+@app.post("/api/docs/open-folder-root")
+async def api_open_doc_root():
+    from db.config import get_doc_root
+    folder = Path(get_doc_root()).expanduser()
+    folder.mkdir(parents=True, exist_ok=True)
+    _open_path(folder)
+    return {"ok": True}
+
+
+@app.get("/api/docs/{doc_id}/file")
+async def api_serve_doc(doc_id: int):
+    from fastapi.responses import FileResponse
+    from db.config import get_doc_root
+    with get_session() as session:
+        doc = session.get(Document, doc_id)
+    if not doc:
+        raise HTTPException(status_code=404)
+    doc_root = Path(get_doc_root()).expanduser()
+    fp = doc_root / doc.rel_path
+    try:
+        fp.relative_to(doc_root)  # path traversal check
+    except ValueError:
+        raise HTTPException(status_code=403)
+    if not fp.is_file():
+        raise HTTPException(status_code=404, detail="File non trovato")
+    return FileResponse(str(fp), filename=doc.orig_name,
+                        media_type=doc.mime_type or "application/octet-stream")
+
+
+def _open_path(path: Path) -> None:
+    import subprocess
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", str(path)])
+    elif sys.platform == "linux":
+        subprocess.Popen(["xdg-open", str(path)])
+    elif sys.platform == "win32":
+        subprocess.Popen(["explorer", str(path)])
 
 
 @app.get("/api/board")
@@ -698,6 +867,20 @@ async def api_backup_json():
 
 
 # ── Config ────────────────────────────────────────────────────────────────────
+
+@app.get("/api/local-ip")
+async def api_local_ip(request: Request):
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+    except Exception:
+        ip = "127.0.0.1"
+    port = request.url.port or 7979
+    scheme = request.url.scheme
+    return {"url": f"{scheme}://{ip}:{port}", "ip": ip, "port": port}
+
 
 @app.get("/api/config/model")
 async def api_get_model():

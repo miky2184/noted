@@ -53,7 +53,7 @@ def install_mac(port: int) -> None:
         <string>{_noted_cmd()}</string>
         <string>web</string>
         <string>--host</string>
-        <string>127.0.0.1</string>
+        <string>0.0.0.0</string>
         <string>--port</string>
         <string>{port}</string>
     </array>
@@ -94,7 +94,7 @@ Description=noted — appunti giornalieri
 After=network.target
 
 [Service]
-ExecStart={_noted_cmd()} web --host 127.0.0.1 --port {port}
+ExecStart={_noted_cmd()} web --host 0.0.0.0 --port {port}
 Restart=on-failure
 RestartSec=5
 {env_line}
