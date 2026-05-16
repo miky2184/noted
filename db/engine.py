@@ -53,6 +53,7 @@ def _migrate():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
             "ALTER TABLE document ADD COLUMN analysis TEXT",
+            "DELETE FROM document WHERE note_id IS NOT NULL AND note_id NOT IN (SELECT id FROM note)",
         ]
         for sql in migrations:
             try:

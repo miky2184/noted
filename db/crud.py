@@ -458,18 +458,15 @@ def update_doc_analysis(session: Session, doc_id: int, analysis: str) -> Optiona
 
 
 def get_all_documents(session: Session, ctx: str = "default", limit: int = 200) -> list[Document]:
-    """Tutti i documenti del contesto, unendo quelli delle note del contesto."""
-    note_ids_in_ctx = session.exec(
-        select(Note.id).where(Note.context == ctx)
-    ).all()
-    if not note_ids_in_ctx:
-        return []
-    return session.exec(
+    """Tutti i documenti del contesto, joinando con note esistenti."""
+    stmt = (
         select(Document)
-        .where(Document.note_id.in_(note_ids_in_ctx))
+        .join(Note, Document.note_id == Note.id)
+        .where(Note.context == ctx)
         .order_by(Document.created_at.desc())
         .limit(limit)
-    ).all()
+    )
+    return session.exec(stmt).all()
 
 
 # ── Gantt ──────────────────────────────────────────────────────────────────────
