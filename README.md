@@ -75,6 +75,15 @@ Il database SQLite si chiama `notes.db`. Per usare una posizione personalizzata 
 export DATABASE_URL="sqlite:////Users/me/iCloud Drive/noted/notes.db"
 ```
 
+Lo schema del database è gestito con **Alembic**. All'avvio `noted` applica
+automaticamente le migrazioni mancanti fino a `head`; per ispezionare o applicare
+manualmente le migrazioni:
+
+```bash
+alembic current
+alembic upgrade head
+```
+
 ---
 
 ## Dashboard web
@@ -269,6 +278,7 @@ noted list --assignee marco         # filtra per assegnatario
 noted list --ctx work               # filtra per contesto
 
 noted search "deploy"               # ricerca full-text
+noted search "fattura acme" --ctx work
 
 noted edit 42 "nuovo testo"
 noted edit 42 --status done
@@ -277,6 +287,20 @@ noted edit 42 --clear-due
 
 noted delete 42
 ```
+
+La ricerca usa SQLite FTS5 quando disponibile: cerca per termini indicizzati in contenuto, tag,
+progetto e assegnatario, ordina per pertinenza e supporta prefissi di parola.
+
+Esempio pratico:
+
+```bash
+noted add "review contratto Acme per fatturazione finale" --project ACME --ctx work
+noted search "fattura acme" --ctx work
+```
+
+Prima, con `LIKE '%fattura acme%'`, questa nota poteva non uscire perché la frase esatta
+non appare nel testo. Ora viene trovata perché `fattura` corrisponde al prefisso di
+`fatturazione` e `acme` viene cercato anche nel progetto.
 
 ### Recap AI
 

@@ -1,7 +1,7 @@
 from datetime import date, datetime, timedelta
 from typing import Optional
 from sqlmodel import Session, select
-from sqlalchemy import or_, delete as sa_delete
+from sqlalchemy import or_, delete as sa_delete, text
 from db.models import Note, Recap, GanttProject, Milestone, Context, NoteDependency, Document
 
 
@@ -230,14 +230,61 @@ def get_due_notes(session: Session, ctx: str = "default") -> list[Note]:
     return session.exec(stmt).all()
 
 
-def search_notes(session: Session, query: str, ctx: str = "default", limit: int = 30) -> list[Note]:
-    stmt = (
-        select(Note)
-        .where(Note.content.ilike(f"%{query}%"), Note.context == ctx)
-        .order_by(Note.created_at.desc())
-        .limit(limit)
-    )
+def _fts_query(query: str) -> str:
+    import re
+
+    terms = re.findall(r"[\w]+", query, flags=re.UNICODE)
+    return " ".join(f"{term}*" for term in terms)
+
+
+def _search_notes_like(session: Session, query: str, ctx: str = "default", limit: int = 30) -> list[Note]:
+    import re
+
+    terms = re.findall(r"[\w]+", query, flags=re.UNICODE)
+    if not terms:
+        return []
+
+    stmt = select(Note).where(Note.context == ctx)
+    for term in terms:
+        stmt = stmt.where(
+            or_(
+                Note.content.ilike(f"%{term}%"),
+                Note.tags.ilike(f"%{term}%"),
+                Note.project.ilike(f"%{term}%"),
+                Note.assignee.ilike(f"%{term}%"),
+            )
+        )
+    stmt = stmt.order_by(Note.created_at.desc()).limit(limit)
     return session.exec(stmt).all()
+
+
+def search_notes(session: Session, query: str, ctx: str = "default", limit: int = 30) -> list[Note]:
+    fts = _fts_query(query)
+    if not fts:
+        return []
+
+    try:
+        rows = session.execute(
+            text("""
+                SELECT note.id
+                FROM note_fts
+                JOIN note ON note.id = note_fts.rowid
+                WHERE note_fts MATCH :query
+                  AND note.context = :ctx
+                ORDER BY bm25(note_fts), note.created_at DESC
+                LIMIT :limit
+            """),
+            {"query": fts, "ctx": ctx, "limit": limit},
+        ).all()
+    except Exception:
+        return _search_notes_like(session, query=query, ctx=ctx, limit=limit)
+
+    ids = [row[0] for row in rows]
+    if not ids:
+        return []
+    notes = session.exec(select(Note).where(Note.id.in_(ids))).all()
+    by_id = {n.id: n for n in notes}
+    return [by_id[nid] for nid in ids if nid in by_id]
 
 
 # ── Recaps ─────────────────────────────────────────────────────────────────────

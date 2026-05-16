@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Appunti giornalieri con recap AI"
 requires-python = ">=3.11"
 dependencies = [
+    "alembic>=1.13",
     "typer[all]>=0.12",
     "sqlmodel>=0.0.19",
     "anthropic>=0.25",

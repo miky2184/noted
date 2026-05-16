@@ -1,10 +1,14 @@
-from sqlmodel import SQLModel, create_engine, Session
-from sqlalchemy import event
+from pathlib import Path
 import os
+
+from sqlalchemy import event
+from sqlmodel import Session, create_engine
+
 
 def _default_db_url() -> str:
     from db.paths import db_path
     return f"sqlite:///{db_path()}"
+
 
 DATABASE_URL = os.getenv("DATABASE_URL") or _default_db_url()
 
@@ -13,6 +17,7 @@ engine = create_engine(
     echo=False,
     connect_args={"check_same_thread": False},
 )
+
 
 @event.listens_for(engine, "connect")
 def _set_sqlite_pragmas(dbapi_conn, _):
@@ -24,48 +29,27 @@ def _set_sqlite_pragmas(dbapi_conn, _):
     cur.close()
 
 
-def _migrate():
-    """Safely add new columns to existing SQLite tables without dropping data."""
-    from sqlalchemy import text
-    with engine.connect() as conn:
-        migrations = [
-            "ALTER TABLE note ADD COLUMN assignee VARCHAR",
-            "ALTER TABLE note ADD COLUMN context VARCHAR DEFAULT 'default'",
-            "ALTER TABLE recap ADD COLUMN context VARCHAR DEFAULT 'default'",
-            "ALTER TABLE ganttproject ADD COLUMN context VARCHAR DEFAULT 'default'",
-            "ALTER TABLE note ADD COLUMN sort_order INTEGER DEFAULT 0",
-            "ALTER TABLE ganttproject ADD COLUMN is_background BOOLEAN DEFAULT 0",
-            """CREATE TABLE IF NOT EXISTS notedependency (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                note_id INTEGER NOT NULL REFERENCES note(id),
-                blocker_id INTEGER NOT NULL REFERENCES note(id),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(note_id, blocker_id)
-            )""",
-            """CREATE TABLE IF NOT EXISTS document (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                note_id INTEGER REFERENCES note(id) ON DELETE SET NULL,
-                rel_path TEXT NOT NULL,
-                orig_name TEXT NOT NULL,
-                mime_type TEXT,
-                size_bytes INTEGER,
-                sha256 TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )""",
-            "ALTER TABLE document ADD COLUMN analysis TEXT",
-            "DELETE FROM document WHERE note_id IS NOT NULL AND note_id NOT IN (SELECT id FROM note)",
-        ]
-        for sql in migrations:
-            try:
-                conn.execute(text(sql))
-                conn.commit()
-            except Exception:
-                pass
+def _run_migrations() -> None:
+    """Apply Alembic migrations to the configured database."""
+    try:
+        from alembic import command
+        from alembic.config import Config
+    except ImportError as exc:
+        raise RuntimeError(
+            "Alembic non installato. Esegui: pip install -e ."
+        ) from exc
+
+    cfg = Config()
+    cfg.set_main_option("script_location", str(Path(__file__).parent / "migrations"))
+    cfg.set_main_option("sqlalchemy.url", DATABASE_URL)
+    cfg.attributes["connection"] = engine
+    command.upgrade(cfg, "head")
 
 
 def _seed_default_context():
     from sqlmodel import Session, select
     from db.models import Context
+
     with Session(engine) as session:
         if not session.exec(select(Context)).first():
             session.add(Context(name="default"))
@@ -73,8 +57,7 @@ def _seed_default_context():
 
 
 def init_db():
-    SQLModel.metadata.create_all(engine)
-    _migrate()
+    _run_migrations()
     _seed_default_context()
 
 
