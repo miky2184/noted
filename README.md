@@ -275,6 +275,39 @@ lo swap del file e applica le migrazioni mancanti.
 
 ⚠️ L'import JSON cancella e reinserisce i dati esistenti — viene richiesta conferma esplicita prima di procedere.
 
+### Menu bar app (macOS)
+
+`noted tray` aggiunge una icona 📝 nella menu bar e una hotkey globale **⌘⇧N** per inserire note anche quando sei su un'altra app.
+
+#### Installazione
+
+```bash
+pip install -e '.[tray]'         # rumps + pynput (una tantum)
+
+# avvio manuale (foreground, utile per debug)
+noted tray                       # contesto: default
+noted tray --ctx work
+
+# avvio automatico al login (LaunchAgent)
+noted tray-install               # installa e avvia
+noted tray-install --ctx work    # con contesto specifico
+noted tray-uninstall             # rimuove
+noted restart                    # riavvia sia il server che il tray
+```
+
+Al primo avvio macOS chiederà di concedere i permessi **Accessibilità** (necessari per la hotkey globale). Vai in **Impostazioni di Sistema → Privacy e Sicurezza → Accessibilità** e aggiungi il tuo Terminale o app Python.
+
+**Funzionamento:**
+
+- Click sull'icona 📝 → menu con "Aggiungi nota…" e "Apri dashboard"
+- **⌃⌥N** (Ctrl+Option+N) da qualsiasi app → finestra di inserimento nota
+- La nota viene salvata direttamente via API REST su noted in esecuzione (`noted web` deve essere attivo)
+- Notifica di conferma al salvataggio
+
+> Per avviare il tray automaticamente al login, puoi aggiungerlo agli **Elementi login** in Impostazioni di Sistema, oppure creare un LaunchAgent separato.
+
+---
+
 ### Scorciatoie da tastiera
 
 | Tasto | Azione |
@@ -385,6 +418,8 @@ noted uninstall
 noted restart                       # riavvia dopo modifiche al codice
 noted upgrade                       # git pull + pip install + restart
 noted upgrade --no-restart
+noted tray                          # menu bar app macOS con ⌘⇧N (richiede: pip install 'noted[tray]')
+noted tray --ctx work
 ```
 
 ---

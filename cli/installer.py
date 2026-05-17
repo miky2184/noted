@@ -80,6 +80,57 @@ def uninstall_mac() -> None:
         LAUNCHD_PLIST.unlink()
 
 
+LAUNCHD_TRAY_LABEL = "com.noted.tray"
+LAUNCHD_TRAY_PLIST = Path.home() / "Library" / "LaunchAgents" / f"{LAUNCHD_TRAY_LABEL}.plist"
+
+
+def install_mac_tray(ctx: str = "default", port: int = 7979) -> None:
+    from db.paths import log_path
+    log = log_path().parent / "tray.log"
+    plist = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{LAUNCHD_TRAY_LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{_noted_cmd()}</string>
+        <string>tray</string>
+        <string>--ctx</string>
+        <string>{ctx}</string>
+        <string>--port</string>
+        <string>{port}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>{_mac_env_vars()}
+    <key>StandardOutPath</key>
+    <string>{log}</string>
+    <key>StandardErrorPath</key>
+    <string>{log}</string>
+</dict>
+</plist>
+"""
+    LAUNCHD_TRAY_PLIST.parent.mkdir(parents=True, exist_ok=True)
+    LAUNCHD_TRAY_PLIST.write_text(plist)
+    subprocess.run(["launchctl", "unload", str(LAUNCHD_TRAY_PLIST)], capture_output=True)
+    subprocess.run(["launchctl", "load", str(LAUNCHD_TRAY_PLIST)], check=True)
+
+
+def uninstall_mac_tray() -> None:
+    if LAUNCHD_TRAY_PLIST.exists():
+        subprocess.run(["launchctl", "unload", str(LAUNCHD_TRAY_PLIST)], capture_output=True)
+        LAUNCHD_TRAY_PLIST.unlink()
+
+
+def restart_mac_tray() -> None:
+    if LAUNCHD_TRAY_PLIST.exists():
+        subprocess.run(["launchctl", "unload", str(LAUNCHD_TRAY_PLIST)], capture_output=True)
+        subprocess.run(["launchctl", "load", str(LAUNCHD_TRAY_PLIST)], check=True)
+
+
 # ── Linux ──────────────────────────────────────────────────────────────────────
 
 SYSTEMD_UNIT = Path.home() / ".config" / "systemd" / "user" / "noted.service"

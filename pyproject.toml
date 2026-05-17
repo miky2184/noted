@@ -25,6 +25,9 @@ dependencies = [
     "python-docx>=1.1",
 ]
 
+[project.optional-dependencies]
+tray = ["rumps>=0.4", "pynput>=1.7"]
+
 [project.scripts]
 noted = "cli.main:app"
 

@@ -565,6 +565,9 @@ def _restart_service() -> None:
     if system == "darwin":
         subprocess.run(["launchctl", "unload", str(LAUNCHD_PLIST)], capture_output=True)
         subprocess.run(["launchctl", "load", str(LAUNCHD_PLIST)], check=True)
+        # riavvia anche il tray se installato
+        from cli.installer import restart_mac_tray
+        restart_mac_tray()
     elif system.startswith("linux"):
         subprocess.run(["systemctl", "--user", "restart", "noted"], check=True)
     elif system == "win32":
@@ -646,6 +649,65 @@ def upgrade(
     except Exception as e:
         console.print(f"[yellow]Aggiornamento applicato ma restart fallito: {e}[/yellow]")
         console.print("[dim]Riavvia manualmente con: noted restart[/dim]")
+
+
+# ── TRAY ───────────────────────────────────────────────────────────────────────
+
+@app.command(name="tray-install")
+def tray_install(
+    ctx: str = typer.Option("default", "--ctx", "-c", help="Contesto attivo"),
+    port: Optional[int] = typer.Option(None, help="Porta del server noted (default: dalla config)"),
+):
+    """Installa noted tray come LaunchAgent (avvio automatico al login). macOS only."""
+    if sys.platform != "darwin":
+        console.print("[red]tray-install è disponibile solo su macOS.[/red]")
+        raise typer.Exit(1)
+    from cli.installer import install_mac_tray, LAUNCHD_TRAY_PLIST
+    from db.config import get_port
+    if port is None:
+        port = get_port()
+    install_mac_tray(ctx=ctx, port=port)
+    console.print(f"✅ [green]noted tray installato come LaunchAgent — si avvierà ad ogni login.[/green]")
+    console.print(f"[dim]Plist: {LAUNCHD_TRAY_PLIST}[/dim]")
+    console.print("[dim]Hotkey globale: ⌃⌥N — richiede permessi Accessibilità in Impostazioni di Sistema[/dim]")
+
+
+@app.command(name="tray-uninstall")
+def tray_uninstall():
+    """Rimuove il LaunchAgent di noted tray. macOS only."""
+    if sys.platform != "darwin":
+        console.print("[red]tray-uninstall è disponibile solo su macOS.[/red]")
+        raise typer.Exit(1)
+    from cli.installer import uninstall_mac_tray
+    uninstall_mac_tray()
+    console.print("✅ [green]noted tray rimosso.[/green]")
+
+
+@app.command()
+def tray(
+    ctx: str = typer.Option("default", "--ctx", "-c", help="Contesto attivo"),
+    port: Optional[int] = typer.Option(None, help="Porta del server noted (default: dalla config)"),
+):
+    """Avvia il menu bar app con hotkey globale ⌘⇧N per aggiungere note. (macOS only)"""
+    if sys.platform != "darwin":
+        console.print("[red]noted tray è disponibile solo su macOS.[/red]")
+        raise typer.Exit(1)
+
+    try:
+        from cli.tray import run_tray
+    except ImportError as exc:
+        from rich.markup import escape
+        console.print(f"[red]{escape(str(exc))}[/red]")
+        console.print("[dim]Installa con: pip install 'noted\\[tray]'[/dim]")
+        raise typer.Exit(1)
+
+    from db.config import get_port
+    if port is None:
+        port = get_port()
+
+    console.print(f"[cyan]📝 noted tray avviato (contesto: {ctx}, porta: {port})[/cyan]")
+    console.print("[dim]Hotkey globale: ⌃⌥N (Ctrl+Option+N) — richiede permessi Accessibilità in Impostazioni di Sistema[/dim]")
+    run_tray(ctx=ctx, port=port)
 
 
 # ── INSTALL-CRON ───────────────────────────────────────────────────────────────
