@@ -90,6 +90,15 @@ alembic upgrade head
 
 Apri **http://noted.local:7979** (o `http://127.0.0.1:7979`).
 
+### Struttura backend
+
+La dashboard FastAPI è composta in `web/app.py`, mentre gli endpoint sono separati
+per dominio in `web/routers/`:
+
+- `contexts.py`, `notes.py`, `docs.py`, `gantt.py`, `recaps.py`, `backup.py`, `settings.py`, `voice.py`
+
+La logica riusabile vive in `web/services/`, per esempio scheduler e gestione documenti.
+
 ### Contesti
 
 Ogni contesto è un database logico separato — note, recap e Gantt non si mescolano mai tra contesti diversi. Il selettore `📁 CONTEXT ▾` in alto a sinistra permette di:
@@ -229,7 +238,11 @@ I file vengono nominati `noted_backup_YYYY-MM-DD.db / .json`.
 | `SQLite (.db)` | Sostituisce il database corrente con il file caricato |
 | `JSON (.json)` | Cancella tutti i dati esistenti e reinserisce quelli dal file |
 
-⚠️ L'import è irreversibile — viene richiesta conferma esplicita prima di procedere. Si consiglia di eseguire un export prima di importare.
+Prima di ripristinare un database SQLite, noted valida il file caricato, crea una copia
+automatica del database corrente con suffisso `.pre_restore_YYYYMMDDHHMMSS`, poi esegue
+lo swap del file e applica le migrazioni mancanti.
+
+⚠️ L'import JSON cancella e reinserisce i dati esistenti — viene richiesta conferma esplicita prima di procedere.
 
 ### Scorciatoie da tastiera
 
@@ -312,6 +325,15 @@ noted recap --weekly                # recap settimanale
 noted recap --save                  # genera e salva nel DB
 noted delete-recap 7
 ```
+
+## Test
+
+```bash
+pytest
+```
+
+I test usano database SQLite e cartelle documenti temporanee, quindi non toccano i dati locali.
+Coprono API principali, ricerca full-text, isolamento contesti, documenti, backup/restore e recap AI con mock.
 
 ### Modello AI
 

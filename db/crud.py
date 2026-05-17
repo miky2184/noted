@@ -381,10 +381,16 @@ def delete_milestone(session: Session, milestone_id: int) -> bool:
 
 # ── Note Dependencies ──────────────────────────────────────────────────────────
 
-def add_dependency(session: Session, note_id: int, blocker_id: int) -> Optional[NoteDependency]:
+def add_dependency(session: Session, note_id: int, blocker_id: int, ctx: Optional[str] = None) -> Optional[NoteDependency]:
     if note_id == blocker_id:
         return None
-    if not session.get(Note, note_id) or not session.get(Note, blocker_id):
+    note = session.get(Note, note_id)
+    blocker = session.get(Note, blocker_id)
+    if not note or not blocker:
+        return None
+    if note.context != blocker.context:
+        return None
+    if ctx is not None and (note.context != ctx or blocker.context != ctx):
         return None
     existing = session.exec(
         select(NoteDependency).where(NoteDependency.note_id == note_id, NoteDependency.blocker_id == blocker_id)
@@ -407,21 +413,27 @@ def remove_dependency(session: Session, note_id: int, blocker_id: int) -> bool:
     session.commit()
     return True
 
-def get_blockers(session: Session, note_id: int) -> list[Note]:
+def get_blockers(session: Session, note_id: int, ctx: Optional[str] = None) -> list[Note]:
     """Note che bloccano note_id."""
     ids = session.exec(select(NoteDependency.blocker_id).where(NoteDependency.note_id == note_id)).all()
     if not ids:
         return []
-    return session.exec(select(Note).where(Note.id.in_(ids))).all()
+    stmt = select(Note).where(Note.id.in_(ids))
+    if ctx is not None:
+        stmt = stmt.where(Note.context == ctx)
+    return session.exec(stmt).all()
 
-def get_blocking(session: Session, note_id: int) -> list[Note]:
+def get_blocking(session: Session, note_id: int, ctx: Optional[str] = None) -> list[Note]:
     """Note bloccate da note_id."""
     ids = session.exec(select(NoteDependency.note_id).where(NoteDependency.blocker_id == note_id)).all()
     if not ids:
         return []
-    return session.exec(select(Note).where(Note.id.in_(ids))).all()
+    stmt = select(Note).where(Note.id.in_(ids))
+    if ctx is not None:
+        stmt = stmt.where(Note.context == ctx)
+    return session.exec(stmt).all()
 
-def get_deps_bulk(session: Session, note_ids: list[int]) -> dict:
+def get_deps_bulk(session: Session, note_ids: list[int], ctx: Optional[str] = None) -> dict:
     """Ritorna {note_id: {blockers: [...], blocking: [...]}} per una lista di note."""
     if not note_ids:
         return {}
@@ -443,7 +455,10 @@ def get_deps_bulk(session: Session, note_ids: list[int]) -> dict:
     # Fetch note summaries for tooltip
     all_ref_ids = blocker_ids | blocking_ids
     if all_ref_ids:
-        ref_notes = {n.id: n for n in session.exec(select(Note).where(Note.id.in_(all_ref_ids))).all()}
+        stmt = select(Note).where(Note.id.in_(all_ref_ids))
+        if ctx is not None:
+            stmt = stmt.where(Note.context == ctx)
+        ref_notes = {n.id: n for n in session.exec(stmt).all()}
         for nid, data in result.items():
             data["blocker_notes"] = [
                 {"id": rid, "content": ref_notes[rid].content[:60], "status": ref_notes[rid].status}
