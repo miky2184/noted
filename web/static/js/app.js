@@ -1,4 +1,5 @@
 // ── State ─────────────────────────────────────────────────────────────────────
+let llmActive = false;
 let currentDate = window.NOTED_BOOT.today;
 let refreshTimer = null;
 let activeTab = 'notes';
@@ -670,11 +671,46 @@ textarea.addEventListener('keydown', e => {
 
 document.getElementById('add-form').addEventListener('submit', async e => {
   e.preventDefault();
-  const content = textarea.value.trim();
+  let content = textarea.value.trim();
   if (!content) return;
 
   const btn = document.getElementById('add-btn');
   btn.disabled = true;
+
+  // ── LLM enhance step ──────────────────────────────────────────────────────
+  if (llmActive) {
+    btn.textContent = '🦙 Elaboro…';
+    try {
+      const llmRes = await fetch('/api/notes/enhance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+      if (llmRes.ok) {
+        const enhanced = await llmRes.json();
+        content = enhanced.content || content;
+        if (enhanced.tags)    document.getElementById('note-tag').value     = enhanced.tags;
+        if (enhanced.project) document.getElementById('note-project').value = enhanced.project;
+        if (enhanced.priority) {
+          const sel = document.getElementById('note-priority');
+          if ([...sel.options].some(o => o.value === enhanced.priority))
+            sel.value = enhanced.priority;
+        }
+        if (enhanced.status) {
+          const sel = document.getElementById('note-status');
+          if ([...sel.options].some(o => o.value === enhanced.status))
+            sel.value = enhanced.status;
+        }
+        textarea.value = content;
+      } else {
+        const err = await llmRes.json().catch(() => ({}));
+        toast(`🦙 ${err.detail || 'Ollama non disponibile'} — salvo nota originale`, 'error');
+      }
+    } catch {
+      toast('🦙 Ollama non raggiungibile — salvo nota originale', 'error');
+    }
+  }
+
   btn.textContent = '⏳ Salvo…';
 
   try {
@@ -2007,6 +2043,7 @@ loadNotes();
 resetRefresh();
 _loadLocalIp();
 loadDocRoot();
+loadOllamaSettings();
 
 // ── Voice input ───────────────────────────────────────────────────────────────
 let _mediaRecorder = null;
@@ -2404,4 +2441,72 @@ async function createDocItems() {
   }
 
   if (skipped) toast(`${skipped} element${skipped > 1 ? 'i' : 'o'} non creato per errore`, 'error');
+}
+
+// ── Ollama LLM ────────────────────────────────────────────────────────────────
+
+function toggleLlm() {
+  llmActive = !llmActive;
+  _syncLlmBtn();
+  if (llmActive) checkOllamaStatus();
+}
+
+function _syncLlmBtn() {
+  const btn = document.getElementById('llm-btn');
+  if (!btn) return;
+  btn.style.borderColor  = llmActive ? 'var(--accent)' : '';
+  btn.style.background   = llmActive ? 'var(--accent-dim)' : '';
+  btn.style.color        = llmActive ? 'var(--accent)' : '';
+  btn.title = llmActive ? 'LLM attivo — clicca per disattivare' : 'Attiva elaborazione LLM (Ollama)';
+}
+
+async function checkOllamaStatus() {
+  const dot = document.getElementById('ollama-status-dot');
+  try {
+    const res = await fetch('/api/ollama/status');
+    const data = await res.json();
+    if (dot) dot.style.background = data.ok ? 'var(--green)' : 'var(--red)';
+    const hint = document.getElementById('ollama-models-hint');
+    if (hint) {
+      hint.textContent = data.ok
+        ? `Modelli disponibili: ${data.models.join(', ') || '—'}`
+        : 'Non raggiungibile. Avvia Ollama con: ollama serve';
+      hint.style.color = data.ok ? 'var(--text-dim)' : 'var(--red)';
+    }
+    if (llmActive && !data.ok) {
+      toast('🦙 Ollama non raggiungibile — attivalo con: ollama serve', 'error');
+      llmActive = false;
+      _syncLlmBtn();
+    }
+  } catch {
+    if (dot) dot.style.background = 'var(--red)';
+  }
+}
+
+async function loadOllamaSettings() {
+  try {
+    const res = await fetch('/api/ollama/settings');
+    const data = await res.json();
+    const urlEl   = document.getElementById('ollama-url-input');
+    const modelEl = document.getElementById('ollama-model-input');
+    if (urlEl)   urlEl.value   = data.url   || '';
+    if (modelEl) modelEl.value = data.model || '';
+  } catch {}
+  checkOllamaStatus();
+}
+
+async function saveOllamaSettings() {
+  const url   = document.getElementById('ollama-url-input')?.value.trim();
+  const model = document.getElementById('ollama-model-input')?.value.trim();
+  try {
+    await fetch('/api/ollama/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: url || null, model: model || null }),
+    });
+    toast('Impostazioni Ollama salvate', 'ok');
+    checkOllamaStatus();
+  } catch {
+    toast('Errore salvataggio impostazioni', 'error');
+  }
 }

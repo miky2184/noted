@@ -81,6 +81,19 @@ def set_doc_root(path: str) -> None:
     _save(data)
 
 
+def get_ollama_url() -> str:
+    return _load().get("ollama_url", "http://localhost:11434")
+
+def set_ollama_url(url: str) -> None:
+    data = _load(); data["ollama_url"] = url.rstrip("/"); _save(data)
+
+def get_ollama_model() -> str:
+    return _load().get("ollama_model", "llama3.2")
+
+def set_ollama_model(model: str) -> None:
+    data = _load(); data["ollama_model"] = model; _save(data)
+
+
 def set_schedule(time_str: str | None, days: list[int] | None, recap_type: str = "daily") -> None:
     data = _load()
     if time_str is None:

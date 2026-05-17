@@ -134,6 +134,7 @@
       <div style="display:flex;align-items:flex-start;gap:8px;">
         <textarea id="note-input" placeholder="Cosa stai facendo? (Invio per inviare, Shift+Invio per andare a capo)" rows="1" style="flex:1;"></textarea>
         <button type="button" class="mic-btn" id="mic-btn" onclick="toggleVoiceRecording()" title="Registra nota vocale">🎙</button>
+        <button type="button" class="mic-btn" id="llm-btn" onclick="toggleLlm()" title="Attiva elaborazione LLM (Ollama)" style="font-size:1rem;">🦙</button>
       </div>
       <div class="add-form-footer">
         <input type="text" id="note-tag" placeholder="#tag" maxlength="60">
@@ -302,6 +303,27 @@
         {% else %}
           <div class="no-recap">Nessun recap salvato.<br>Clicca <strong>Daily</strong> per generarne uno.</div>
         {% endif %}
+      </div>
+    </div>
+
+    <div class="sidebar-section" id="ollama-section">
+      <div class="section-header">
+        <span class="section-title">🦙 Ollama</span>
+        <span id="ollama-status-dot" style="width:8px;height:8px;border-radius:50%;background:var(--border);flex-shrink:0;transition:background 0.3s;" title="Stato connessione"></span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <label style="font-size:0.75rem;color:var(--text-muted);">URL server</label>
+        <input type="text" id="ollama-url-input" placeholder="http://localhost:11434"
+               style="background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:0.78rem;padding:5px 8px;outline:none;"
+               onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
+        <label style="font-size:0.75rem;color:var(--text-muted);">Modello</label>
+        <div style="display:flex;gap:6px;">
+          <input type="text" id="ollama-model-input" placeholder="llama3.2"
+                 style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:0.78rem;padding:5px 8px;outline:none;"
+                 onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
+          <button onclick="saveOllamaSettings()" style="background:var(--accent);color:#0d0f1a;border:none;border-radius:6px;padding:5px 12px;font-size:0.78rem;font-weight:700;cursor:pointer;">Salva</button>
+        </div>
+        <div id="ollama-models-hint" style="font-size:0.68rem;color:var(--text-dim);"></div>
       </div>
     </div>
 

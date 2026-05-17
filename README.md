@@ -12,6 +12,7 @@ Note di lavoro giornaliere con recap AI, board kanban, Gantt e gestione contesti
 
 - Python 3.11+
 - Una API key Anthropic (per i recap AI) → [console.anthropic.com](https://console.anthropic.com)
+- **Opzionale:** [Ollama](https://ollama.com) per l'elaborazione AI locale delle note (auto-tagging, riscrittura)
 
 ---
 
@@ -40,7 +41,37 @@ echo "ANTHROPIC_API_KEY=sk-ant-..." > .env
 
 > Senza API key i recap AI non funzionano, ma tutto il resto (note, board, Gantt, scadenze) sì.
 
-### 4. Installa come servizio (avvio automatico al boot)
+### 4. (Opzionale) Installa Ollama per l'AI locale
+
+Ollama permette di elaborare le note con un LLM locale senza inviare dati al cloud.
+
+```bash
+# macOS
+brew install ollama
+
+# oppure scarica l'installer da https://ollama.com/download
+```
+
+Scarica un modello e avvia il server:
+
+```bash
+# scarica un modello (una tantum):
+ollama pull llama3.2          # ~2 GB — buon bilanciamento qualità/velocità
+ollama pull llama3.2:1b       # ~800 MB — più leggero
+ollama pull qwen2.5:3b        # ~2 GB — ottimo per output JSON strutturato
+
+# avvio manuale (foreground):
+ollama serve
+
+# oppure come servizio in background (avvio automatico al login):
+brew services start ollama    # macOS con Homebrew
+brew services stop ollama     # ferma
+brew services restart ollama  # riavvia
+```
+
+> Una volta avviato, il bottone 🦙 nel form di aggiunta nota diventa disponibile. URL e modello sono configurabili dalla sidebar → sezione **🦙 Ollama**.
+
+### 5. Installa come servizio (avvio automatico al boot)
 
 ```bash
 noted install

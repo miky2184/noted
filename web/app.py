@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from db import crud
 from db.engine import get_session, init_db
 from web.deps import get_ctx, templates
-from web.routers import backup, contexts, docs, gantt, notes, recaps, settings, voice
+from web.routers import backup, contexts, docs, gantt, notes, recaps, settings, voice, ollama
 from web.services.scheduler_service import lifespan
 
 
@@ -28,6 +28,7 @@ app.include_router(gantt.router)
 app.include_router(recaps.router)
 app.include_router(backup.router)
 app.include_router(voice.router)
+app.include_router(ollama.router)
 
 
 @app.get("/", response_class=HTMLResponse)
