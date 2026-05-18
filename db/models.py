@@ -20,11 +20,11 @@ class Note(SQLModel, table=True):
     project: Optional[str] = None
     priority: str = Field(default="medium")
     due_date: Optional[date] = None
-    status: Optional[str] = None   # backlog | todo | wip | waiting | blocked | done
+    status: Optional[str] = Field(default=None, index=True)
     assignee: Optional[str] = None
-    context: str = Field(default="default")
+    context: str = Field(default="default", index=True)
     sort_order: int = Field(default=0)
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=datetime.now, index=True)
     updated_at: datetime = Field(default_factory=datetime.now)
 
     def tags_list(self) -> list[str]:

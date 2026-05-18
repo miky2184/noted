@@ -25,13 +25,45 @@ git clone <repo-url> noted
 cd noted
 ```
 
-### 2. Crea un ambiente virtuale e installa le dipendenze
+### 2. Installa il comando `noted` globalmente (consigliato)
+
+Usa **pipx** per rendere `noted` disponibile da qualsiasi directory senza attivare il venv:
+
+```bash
+# Installa pipx (una tantum)
+brew install pipx
+pipx ensurepath
+source ~/.zshrc      # oppure apri un nuovo terminale
+
+# Installa noted in modalità editable — le modifiche al codice sono subito attive
+pipx install -e ~/Documents/Workspace/noted --python python3
+
+# Dipendenze opzionali
+pipx inject noted rumps pynput   # menu bar app (macOS)
+pipx inject noted pytest         # test
+```
+
+Dopo questa operazione `noted` funziona da qualsiasi directory:
+
+```bash
+noted web
+noted tray-install
+noted add "nota veloce"
+```
+
+#### Alternativa: venv manuale
+
+Se preferisci non usare pipx:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -e .
+pip install -e '.[tray]'       # opzionale: menu bar app
+pip install -e '.[dev]'        # opzionale: test
 ```
+
+Con il venv manuale il comando `noted` è disponibile solo dopo `source .venv/bin/activate`.
 
 ### 3. Configura la API key
 
@@ -77,13 +109,17 @@ brew services restart ollama  # riavvia
 noted install
 ```
 
-Registra noted come **LaunchAgent** (macOS), **servizio systemd** (Linux) o **Task Scheduler** (Windows), aggiunge `noted.local` a `/etc/hosts` e lo avvia automaticamente ad ogni login su **http://noted.local:7979**.
+Registra noted come **LaunchAgent** (macOS), **servizio systemd** (Linux) o **Task Scheduler** (Windows), aggiunge `noted.local` a `/etc/hosts` e lo avvia automaticamente ad ogni login.
+
+Dashboard:
+- senza HTTPS locale: **http://noted.local:7979**
+- dopo `noted setup-https`: **https://noted.local:7979**
 
 ```bash
 noted uninstall         # rimuove il servizio (i dati restano intatti)
 ```
 
-### 5. Avvio manuale
+### 6. Avvio manuale
 
 ```bash
 noted web               # http://127.0.0.1:7979
@@ -119,7 +155,9 @@ alembic upgrade head
 
 ## Dashboard web
 
-Apri **http://noted.local:7979** (o `http://127.0.0.1:7979`).
+Apri **http://noted.local:7979** oppure **http://127.0.0.1:7979**.
+
+Se hai eseguito `noted setup-https`, usa invece **https://noted.local:7979**.
 
 ### Struttura backend
 
@@ -277,12 +315,12 @@ lo swap del file e applica le migrazioni mancanti.
 
 ### Menu bar app (macOS)
 
-`noted tray` aggiunge una icona 📝 nella menu bar e una hotkey globale **⌘⇧N** per inserire note anche quando sei su un'altra app.
+`noted tray` aggiunge una icona 📝 nella menu bar e una hotkey globale **⌃⌥N** (Ctrl+Option+N) per inserire note anche quando sei su un'altra app.
 
 #### Installazione
 
 ```bash
-pip install -e '.[tray]'         # rumps + pynput (una tantum)
+pip install -e '.[tray]'         # rumps + pynput + PyObjC/Cocoa (una tantum)
 
 # avvio manuale (foreground, utile per debug)
 noted tray                       # contesto: default
@@ -418,7 +456,7 @@ noted uninstall
 noted restart                       # riavvia dopo modifiche al codice
 noted upgrade                       # git pull + pip install + restart
 noted upgrade --no-restart
-noted tray                          # menu bar app macOS con ⌘⇧N (richiede: pip install 'noted[tray]')
+noted tray                          # menu bar app macOS con ⌃⌥N (richiede: pip install 'noted[tray]')
 noted tray --ctx work
 ```
 

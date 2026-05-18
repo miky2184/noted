@@ -1,14 +1,15 @@
 """
-noted tray — menu bar app macOS con hotkey globale ⌘⇧N.
+noted tray — menu bar app macOS con hotkey globale ⌃⌥N.
 
 Dipendenze opzionali:
-    pip install -e '.[tray]'   # rumps + pynput
+    pip install -e '.[tray]'   # rumps + pynput + PyObjC/Cocoa
 """
 import json
 import ssl
 import sys
 import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -18,6 +19,11 @@ try:
     import rumps
 except ImportError as _e:
     raise ImportError("rumps non installato. Esegui: pip install -e '.[tray]'") from _e
+
+try:
+    import AppKit  # noqa: F401
+except ImportError as _e:
+    raise ImportError("PyObjC/Cocoa non installato. Esegui: pip install -e '.[tray]'") from _e
 
 try:
     from pynput import keyboard as _kb
@@ -80,29 +86,51 @@ def _ssl_ctx() -> ssl.SSLContext:
     return ctx
 
 
+def _load_contexts() -> list[str]:
+    """Legge i contesti disponibili direttamente dal DB (senza server)."""
+    try:
+        from db.engine import get_session, init_db
+        from db import crud
+        init_db()
+        with get_session() as session:
+            return [c.name for c in crud.get_contexts(session)]
+    except Exception:
+        return ["default"]
+
+
+def _load_favorite_ctx() -> str:
+    """Legge il contesto preferito dal config locale."""
+    try:
+        from db.config import get_favorite_ctx
+        return get_favorite_ctx()
+    except Exception:
+        return "default"
+
+
 class NotedTrayApp(rumps.App):
-    def __init__(self, ctx: str = "default", port: int = 7979):
+    def __init__(self, ctx: str | None = None, port: int = 7979):
         super().__init__("noted", title="📝", quit_button=None)
 
+        # Rimuovi dal Dock — rumps ha già chiamato NSApplication.sharedApplication()
+        # in super().__init__, quindi la referenza è valida subito (senza timer)
+        try:
+            from AppKit import NSApplication
+            NSApplication.sharedApplication().setActivationPolicy_(1)
+        except Exception:
+            pass
+
         if _ICON.exists():
-            self.template = False   # deve essere impostato PRIMA di icon
+            self.template = False
             self.icon = str(_ICON)
             self.title = ""
 
-        # Rimuove l'icona dal Dock dopo che il run loop è partito
-        rumps.Timer(self._hide_dock, 0.1).start()
-        self._ctx = ctx
+        # Usa il contesto preferito se non specificato esplicitamente
+        self._ctx = ctx or _load_favorite_ctx()
         self._port = port
         self._triggered = False
+        self._hotkey_error: str | None = None
 
-        self.menu = [
-            rumps.MenuItem("Apri dashboard", callback=self._open_dashboard),
-            rumps.MenuItem(f"Contesto: {ctx}"),
-            None,
-            rumps.MenuItem("Aggiungi nota…", callback=self._open_input),
-            None,
-            rumps.MenuItem("Esci", callback=rumps.quit_application),
-        ]
+        self._build_menu()
 
         self._poll_timer = rumps.Timer(self._poll, 0.15)
         self._poll_timer.start()
@@ -116,15 +144,31 @@ class NotedTrayApp(rumps.App):
                 message="Installa pynput: pip install pynput",
             )
 
-    # ── dock ────────────────────────────────────────────────────────────────
+    def _build_menu(self):
+        contexts = _load_contexts()
 
-    def _hide_dock(self, timer):
-        timer.stop()
-        try:
-            from AppKit import NSApp
-            NSApp.setActivationPolicy_(1)  # NSApplicationActivationPolicyAccessory
-        except Exception:
-            pass
+        # Dizionario name→MenuItem per poter aggiornare le spunte senza
+        # dover navigare l'albero rumps (che non espone i submenu facilmente)
+        self._ctx_items: dict[str, rumps.MenuItem] = {}
+        for name in contexts:
+            item = rumps.MenuItem(name.upper(), callback=self._switch_ctx)
+            item.state = 1 if name == self._ctx else 0   # 1 = ✓
+            self._ctx_items[name] = item
+
+        self.menu = [
+            rumps.MenuItem("Apri dashboard", callback=self._open_dashboard),
+            rumps.MenuItem("Aggiungi nota…", callback=self._open_input),
+            None,
+            rumps.MenuItem("Contesto", list(self._ctx_items.values())),
+            None,
+            rumps.MenuItem("Esci", callback=rumps.quit_application),
+        ]
+
+    def _switch_ctx(self, sender):
+        new_ctx = sender.title.lower()
+        self._ctx = new_ctx
+        for name, item in self._ctx_items.items():
+            item.state = 1 if name == new_ctx else 0
 
     # ── hotkey ──────────────────────────────────────────────────────────────
 
@@ -135,10 +179,18 @@ class NotedTrayApp(rumps.App):
         try:
             with _kb.GlobalHotKeys({_HOTKEY: _on_activate}) as h:
                 h.join()
-        except Exception:
-            pass  # Accessibility permissions non concesse
+        except Exception as exc:
+            self._hotkey_error = str(exc) or "Permessi Accessibilità mancanti"
 
     def _poll(self, _):
+        if self._hotkey_error:
+            message = self._hotkey_error
+            self._hotkey_error = None
+            rumps.notification(
+                title="noted",
+                subtitle="Hotkey non attiva",
+                message=f"Concedi Accessibilità a Terminale/Python. Dettaglio: {message}",
+            )
         if self._triggered:
             self._triggered = False
             self._open_input(None)
@@ -157,7 +209,8 @@ class NotedTrayApp(rumps.App):
     # ── network ─────────────────────────────────────────────────────────────
 
     def _post_note(self, content: str):
-        url = f"{_base_url(self._port)}/api/notes?ctx={self._ctx}"
+        query = urllib.parse.urlencode({"ctx": self._ctx})
+        url = f"{_base_url(self._port)}/api/notes?{query}"
         payload = json.dumps({"content": content}).encode()
         req = urllib.request.Request(
             url,
@@ -183,5 +236,5 @@ class NotedTrayApp(rumps.App):
             rumps.notification(title="noted", subtitle="Errore", message=str(exc))
 
 
-def run_tray(ctx: str = "default", port: int = 7979) -> None:
+def run_tray(ctx: str | None = None, port: int = 7979) -> None:
     NotedTrayApp(ctx=ctx, port=port).run()

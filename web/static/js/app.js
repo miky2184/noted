@@ -180,6 +180,12 @@ function toggleFavorite(e, name) {
   localStorage.setItem('noted-favorite-ctx', newFav);
   _refreshStars();
   toast(newFav === name ? `⭐ ${name.toUpperCase()} impostato come preferito` : 'Preferito rimosso');
+  // Persisti lato server (usato dal tray e da altri client)
+  fetch('/api/settings/favorite-ctx', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: newFav }),
+  }).catch(() => {});
 }
 
 function _refreshStars() {
@@ -287,40 +293,45 @@ function switchTab(tab) {
   activeTab = tab;
   const isMobile = window.innerWidth <= 768;
 
-  ['notes', 'board', 'due', 'gantt'].forEach(t => {
-    document.getElementById(`tab-${t}`).classList.toggle('active', t === tab);
+  ['notes', 'focus', 'board', 'due', 'gantt', 'docs'].forEach(t => {
+    const tabBtn = document.getElementById(`tab-${t}`);
+    if (tabBtn) tabBtn.classList.toggle('active', t === tab);
     const mb = document.getElementById(`mnav-${t}`);
     if (mb) mb.classList.toggle('active', t === tab);
   });
 
   document.getElementById('view-notes').style.display = tab === 'notes' ? 'block' : 'none';
+  document.getElementById('view-focus').style.display = tab === 'focus' ? 'block' : 'none';
   document.getElementById('view-board').style.display = tab === 'board' ? 'block' : 'none';
   document.getElementById('view-due').style.display = tab === 'due' ? 'block' : 'none';
   document.getElementById('view-gantt').style.display = tab === 'gantt' ? 'block' : 'none';
+  document.getElementById('view-docs').style.display = tab === 'docs' ? 'block' : 'none';
   document.getElementById('date-nav').style.display = tab === 'notes' ? '' : 'none';
   document.getElementById('filter-bar').style.display = 'none';
 
   if (isMobile) {
-    const showFab = tab === 'notes' && isToday(currentDate);
+    const showFab = (tab === 'notes' || tab === 'focus') && isToday(currentDate);
     const fab = document.getElementById('mobile-fab');
     if (fab) fab.style.display = showFab ? 'flex' : 'none';
     if (!showFab) closeNoteSheet();
   } else {
-    document.getElementById('add-form').style.display = (tab === 'notes' && isToday(currentDate)) ? '' : 'none';
+    document.getElementById('add-form').style.display = ((tab === 'notes' || tab === 'focus') && isToday(currentDate)) ? '' : 'none';
   }
 
-  if (tab === 'gantt') {
+  if (tab === 'gantt' || tab === 'docs') {
     if (!isMobile) {
       document.querySelector('.sidebar').style.display = 'none';
       document.querySelector('.layout').style.gridTemplateColumns = '1fr';
     }
-    loadGantt();
+    if (tab === 'gantt') loadGantt();
+    if (tab === 'docs') loadDocList();
   } else {
     if (!isMobile) {
       document.querySelector('.sidebar').style.display = '';
       document.querySelector('.layout').style.gridTemplateColumns = '1fr 360px';
     }
   }
+  if (tab === 'focus') loadFocus();
   if (tab === 'due') loadDueNotes();
   if (tab === 'board') loadBoard();
 }
@@ -431,6 +442,114 @@ function renderDueNotes(notes) {
     }).join('');
   }
   list.innerHTML = html;
+}
+
+async function reloadActiveView() {
+  if (activeTab === 'board') return loadBoard();
+  if (activeTab === 'due') return loadDueNotes();
+  if (activeTab === 'focus') return loadFocus();
+  return loadNotes();
+}
+
+// ── Focus mode ───────────────────────────────────────────────────────────────
+async function loadFocus() {
+  try {
+    const today = window.NOTED_BOOT.today;
+    const [dueRes, boardRes, notesRes] = await Promise.all([
+      apiFetch('/api/notes/due'),
+      apiFetch('/api/board'),
+      apiFetch('/api/notes?' + new URLSearchParams({ day: today })),
+    ]);
+    const due = await dueRes.json();
+    const board = await boardRes.json();
+    const notes = await notesRes.json();
+    renderFocus({ due, board, notes });
+  } catch(e) {
+    console.error(e);
+    toast('Errore caricamento focus', 'error');
+  }
+}
+
+function _uniqueNotes(notes) {
+  const seen = new Set();
+  return notes.filter(n => {
+    if (seen.has(n.id)) return false;
+    seen.add(n.id);
+    return true;
+  });
+}
+
+function renderFocus({ due, board, notes }) {
+  const today = window.NOTED_BOOT.today;
+  const overdue = due.filter(n => n.due_date < today);
+  const dueToday = due.filter(n => n.due_date === today);
+  const wip = board.wip || [];
+  const inbox = _uniqueNotes([
+    ...(board.inbox || []),
+    ...notes.filter(n => n.status !== 'done' && (!n.project || !n.status || !n.due_date)),
+  ]).slice(0, 8);
+  const total = _uniqueNotes([...overdue, ...dueToday, ...wip, ...inbox]).length;
+
+  document.getElementById('focus-count').textContent = total;
+  document.getElementById('focus-summary').innerHTML = [
+    { n: overdue.length, label: 'scadute' },
+    { n: dueToday.length, label: 'da fare oggi' },
+    { n: wip.length, label: 'in corso' },
+    { n: inbox.length, label: 'da triagiare' },
+  ].map(s => `
+    <div class="focus-stat">
+      <div class="focus-stat-num">${s.n}</div>
+      <div class="focus-stat-label">${s.label}</div>
+    </div>
+  `).join('');
+
+  const groups = [
+    { key: 'overdue', title: 'Scadute', notes: overdue, empty: 'Nessuna scadenza arretrata.' },
+    { key: 'today', title: 'Oggi', notes: dueToday, empty: 'Nessuna scadenza per oggi.' },
+    { key: 'wip', title: 'In corso', notes: wip, empty: 'Niente in corso.' },
+    { key: 'inbox', title: 'Da triagiare', notes: inbox, empty: 'Inbox pulita.' },
+  ];
+
+  document.getElementById('focus-grid').innerHTML = groups.map(g => `
+    <section class="focus-panel">
+      <div class="focus-panel-header">
+        <span class="focus-panel-title">${g.title}</span>
+        <span class="count-badge">${g.notes.length}</span>
+      </div>
+      <div class="focus-panel-body">
+        ${g.notes.length ? g.notes.map(n => focusCard(n, g.key)).join('') : `<div class="empty" style="padding:10px">${g.empty}</div>`}
+      </div>
+    </section>
+  `).join('');
+}
+
+function focusCard(n, kind) {
+  const projHtml = n.project ? `<span class="project-badge">${escHtml(n.project)}</span>` : '';
+  const dueHtml = n.due_date ? `<span class="due-date ${n.due_date < window.NOTED_BOOT.today ? 'overdue' : 'soon'}">📅 ${n.due_date}</span>` : '';
+  const statusHtml = n.status ? `<span class="status status-${n.status}">${STATUS_LABEL[n.status] || n.status}</span>` : `<span class="status status-empty">inbox</span>`;
+  const nextAction = kind === 'inbox'
+    ? `<button class="focus-action" onclick="quickPatchFocus(${n.id},{status:'todo'})">todo</button>`
+    : `<button class="focus-action" onclick="quickPatchFocus(${n.id},{status:'done'})">done</button>`;
+  return `
+    <article class="focus-card ${kind}" data-id="${n.id}">
+      <div class="focus-card-title" onclick="startEdit(this,${n.id})">${escHtml(n.content)}</div>
+      <div class="focus-card-meta">
+        ${projHtml}${statusHtml}<span class="priority priority-${n.priority}">${n.priority}</span>${dueHtml}
+        <button class="focus-action" onclick="cycleStatus(${n.id},'${n.status || ''}')">stato</button>
+        ${nextAction}
+      </div>
+    </article>
+  `;
+}
+
+async function quickPatchFocus(noteId, patch) {
+  try {
+    await patchNote(noteId, patch);
+    await loadFocus();
+    toast('Focus aggiornato', 'success');
+  } catch {
+    toast('Errore aggiornamento focus', 'error');
+  }
 }
 
 // ── Date navigation ───────────────────────────────────────────────────────────
@@ -645,6 +764,56 @@ function renderFilterBar() {
   if (activeProject) bar.innerHTML += `<span class="filter-chip">${escHtml(activeProject)} <button onclick="clearFilter('project')">✕</button></span>`;
 }
 
+const NOTE_TEMPLATES = {
+  meeting: {
+    content: "Meeting: \n\nPartecipanti: \n\nPunti discussi:\n- \n\nDecisioni:\n- \n\nAzioni:\n- ",
+    tags: "meeting",
+    status: "todo",
+  },
+  decision: {
+    content: "Decisione: \n\nContesto:\n\nOpzioni considerate:\n- \n\nDecisione presa:\n\nMotivo:",
+    tags: "decisione",
+    status: "",
+  },
+  followup: {
+    content: "Follow-up: \n\nDa fare:\n- \n\nProssimo passo:",
+    tags: "followup",
+    status: "todo",
+    priority: "medium",
+  },
+  idea: {
+    content: "Idea: \n\nPerché è utile:\n\nPrimo esperimento:",
+    tags: "idea",
+    status: "backlog",
+    priority: "low",
+  },
+};
+
+async function applyNoteTemplate(templateId) {
+  const template = NOTE_TEMPLATES[templateId];
+  if (!template) return;
+  const input = document.getElementById('note-input');
+  if (input.value.trim()) {
+    const ok = await showConfirm(
+      'Applica template',
+      'Il testo corrente verrà sostituito dal template selezionato.<br>Gli altri campi del form verranno aggiornati dove previsto.',
+      'Sostituisci'
+    );
+    if (!ok) {
+      document.getElementById('note-template').value = '';
+      return;
+    }
+  }
+  input.value = template.content;
+  document.getElementById('note-tag').value = template.tags || '';
+  document.getElementById('note-status').value = template.status || '';
+  document.getElementById('note-priority').value = template.priority || 'medium';
+  input.style.height = 'auto';
+  input.style.height = input.scrollHeight + 'px';
+  input.focus();
+  document.getElementById('note-template').value = '';
+}
+
 function filterBy(type, value) {
   if (type === 'tag') activeTag = value;
   else activeProject = value;
@@ -755,9 +924,7 @@ async function deleteNote(id) {
   try {
     const res = await fetch(`/api/notes/${id}`, { method: 'DELETE' });
     if (!res.ok) throw new Error();
-    if (activeTab === 'board') await loadBoard();
-    else if (activeTab === 'due') await loadDueNotes();
-    else await loadNotes();
+    await reloadActiveView();
     toast('Nota eliminata');
   } catch {
     if (card) card.style.opacity = '1';
@@ -789,9 +956,7 @@ function startEdit(el, noteId) {
     try {
       await patchNote(noteId, { content: newContent });
       toast('Nota aggiornata', 'success');
-      if (activeTab === 'board') await loadBoard();
-      else if (activeTab === 'due') await loadDueNotes();
-      else await loadNotes();
+      await reloadActiveView();
     } catch {
       el.textContent = original;
       toast('Errore salvataggio', 'error');
@@ -811,9 +976,7 @@ async function cycleStatus(noteId, currentStatus) {
   try {
     await patchNote(noteId, { status: next === null ? '' : next });
     toast(next ? `Stato: ${next}` : 'Stato rimosso');
-    if (activeTab === 'board') await loadBoard();
-    else if (activeTab === 'due') await loadDueNotes();
-    else { await loadNotes(); }
+    await reloadActiveView();
   } catch { toast('Errore aggiornamento stato', 'error'); }
 }
 
@@ -825,7 +988,7 @@ async function cyclePriority(noteId, currentPriority) {
   try {
     await patchNote(noteId, { priority: next });
     toast(`Priorità: ${next}`);
-    activeTab === 'due' ? await loadDueNotes() : await loadNotes();
+    await reloadActiveView();
   } catch { toast('Errore aggiornamento priorità', 'error'); }
 }
 
@@ -1346,6 +1509,8 @@ document.addEventListener('keydown', e => {
       _closeVoiceModal();
     } else if (document.getElementById('shortcuts-modal').classList.contains('show')) {
       closeShortcuts();
+    } else if (document.getElementById('settings-modal').classList.contains('open')) {
+      closeSettings();
     } else if (isEditing) {
       document.activeElement.blur();
     }
@@ -1362,6 +1527,10 @@ document.addEventListener('keydown', e => {
   if (e.key === '1') { e.preventDefault(); switchTab('notes'); }
   if (e.key === '2') { e.preventDefault(); switchTab('board'); }
   if (e.key === '3') { e.preventDefault(); switchTab('due'); }
+  if (e.key === '4') { e.preventDefault(); switchTab('focus'); }
+  if (e.key === '5') { e.preventDefault(); switchTab('gantt'); }
+  if (e.key === '6') { e.preventDefault(); switchTab('docs'); }
+  if (e.key === ',') { e.preventDefault(); openSettings(); }
   if (e.key === '?') { e.preventDefault(); toggleShortcuts(); }
 });
 
@@ -1397,6 +1566,17 @@ function closeShortcuts(e) {
   if (!e || e.target === document.getElementById('shortcuts-modal')) {
     document.getElementById('shortcuts-modal').classList.remove('show');
   }
+}
+
+function openSettings() {
+  document.getElementById('settings-modal').classList.add('open');
+  loadOllamaSettings();
+  loadDocRoot();
+  initSchedule();
+}
+function closeSettings(e) {
+  if (e && e.target !== document.getElementById('settings-modal')) return;
+  document.getElementById('settings-modal').classList.remove('open');
 }
 
 function goToNote(e, dateStr) {
@@ -1888,6 +2068,27 @@ function closeMobileSidebar() {
   document.getElementById('sidebar-backdrop').classList.remove('show');
 }
 
+function toggleSidebarSection(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.toggle('collapsed');
+  // Persisti stato in localStorage
+  const key = `noted-sidebar-${id}`;
+  localStorage.setItem(key, el.classList.contains('collapsed') ? '1' : '0');
+}
+
+// Ripristina stato collassato al caricamento
+(function _restoreSidebarSections() {
+  ['section-schedule', 'section-ollama', 'section-docs'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const stored = localStorage.getItem(`noted-sidebar-${id}`);
+    // default: collapsed (stored === null → collapsed)
+    if (stored === '0') el.classList.remove('collapsed');
+    else el.classList.add('collapsed');
+  });
+})();
+
 // ── Local IP button ───────────────────────────────────────────────────────────
 async function _loadLocalIp() {
   try {
@@ -2210,15 +2411,15 @@ function pwaRefresh() {
 // ── Doc analysis ──────────────────────────────────────────────────────────────
 let _analysisItems = [];   // risultati correnti dall'AI
 
-async function openDocAnalysis() {
-  document.getElementById('doc-analysis-modal').classList.add('show');
-  closeMobileSidebar();
-  await _loadDocsForAnalysis();
+function openDocAnalysis() {
+  switchTab('docs');
+}
+function closeDocAnalysis(e) {
+  // legacy no-op — l'analisi è ora nel tab docs
 }
 
-function closeDocAnalysis(e) {
-  if (e && e.target !== document.getElementById('doc-analysis-modal')) return;
-  document.getElementById('doc-analysis-modal').classList.remove('show');
+function loadDocList() {
+  _loadDocsForAnalysis();
 }
 
 async function _loadDocsForAnalysis() {

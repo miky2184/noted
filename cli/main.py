@@ -685,10 +685,10 @@ def tray_uninstall():
 
 @app.command()
 def tray(
-    ctx: str = typer.Option("default", "--ctx", "-c", help="Contesto attivo"),
+    ctx: Optional[str] = typer.Option(None, "--ctx", "-c", help="Contesto attivo (default: contesto preferito)"),
     port: Optional[int] = typer.Option(None, help="Porta del server noted (default: dalla config)"),
 ):
-    """Avvia il menu bar app con hotkey globale ⌘⇧N per aggiungere note. (macOS only)"""
+    """Avvia il menu bar app con hotkey globale ⌃⌥N per aggiungere note. (macOS only)"""
     if sys.platform != "darwin":
         console.print("[red]noted tray è disponibile solo su macOS.[/red]")
         raise typer.Exit(1)

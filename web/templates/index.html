@@ -29,9 +29,11 @@
 
   <div class="tabs">
     <button class="tab-btn active" id="tab-notes" onclick="switchTab('notes')">📝 Oggi</button>
+    <button class="tab-btn" id="tab-focus" onclick="switchTab('focus')">🎯 Focus</button>
     <button class="tab-btn" id="tab-board" onclick="switchTab('board')">🗂 Board</button>
     <button class="tab-btn" id="tab-due" onclick="switchTab('due')">📅 Scadenze</button>
     <button class="tab-btn" id="tab-gantt" onclick="switchTab('gantt')">📊 Gantt</button>
+    <button class="tab-btn" id="tab-docs" onclick="switchTab('docs')">📎 Analisi</button>
   </div>
 
   <div class="date-nav" id="date-nav">
@@ -95,11 +97,12 @@
     </div>
   </div>
 
-  <div class="refresh-dot" id="refresh-dot" title="Auto-refresh attivo"></div>
+  <div class="refresh-dot" id="refresh-dot" title="Aggiornamento automatico ogni 60s"></div>
   <div id="saving-dot" title="Salvataggio in corso…"></div>
   <button class="ip-btn" id="ip-btn" onclick="copyLocalUrl()" title="Copia URL per accesso mobile" style="display:none;">📱 …</button>
   <button id="pwa-refresh" onclick="pwaRefresh()" title="Aggiorna">↻</button>
   <button class="shortcuts-btn" id="shortcuts-btn" onclick="toggleShortcuts()" title="Scorciatoie da tastiera (?)">?</button>
+  <button class="theme-btn" id="settings-btn" onclick="openSettings()" title="Impostazioni">⚙</button>
   <button class="theme-btn" id="theme-toggle" title="Cambia tema">🌙</button>
   <button id="sidebar-toggle" onclick="toggleMobileSidebar()" title="Recap e impostazioni">☰</button>
 </div>
@@ -117,6 +120,10 @@
     <span class="mobile-nav-icon">🗂</span>
     <span class="mobile-nav-label">Board</span>
   </button>
+  <button class="mobile-nav-btn" id="mnav-focus" onclick="switchTab('focus')">
+    <span class="mobile-nav-icon">🎯</span>
+    <span class="mobile-nav-label">Focus</span>
+  </button>
   <button class="mobile-nav-btn" id="mnav-due" onclick="switchTab('due')">
     <span class="mobile-nav-icon">📅</span>
     <span class="mobile-nav-label">Scadenze</span>
@@ -124,6 +131,10 @@
   <button class="mobile-nav-btn" id="mnav-gantt" onclick="switchTab('gantt')">
     <span class="mobile-nav-icon">📊</span>
     <span class="mobile-nav-label">Gantt</span>
+  </button>
+  <button class="mobile-nav-btn" id="mnav-docs" onclick="switchTab('docs')">
+    <span class="mobile-nav-icon">📎</span>
+    <span class="mobile-nav-label">Analisi</span>
   </button>
 </nav>
 
@@ -137,6 +148,13 @@
         <button type="button" class="mic-btn" id="llm-btn" onclick="toggleLlm()" title="Attiva elaborazione LLM (Ollama)" style="font-size:1rem;">🦙</button>
       </div>
       <div class="add-form-footer">
+        <select id="note-template" title="Template nota" onchange="applyNoteTemplate(this.value)" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-family:inherit;font-size:0.78rem;padding:4px 8px;outline:none;cursor:pointer;">
+          <option value="">template</option>
+          <option value="meeting">Meeting</option>
+          <option value="decision">Decisione</option>
+          <option value="followup">Follow-up</option>
+          <option value="idea">Idea</option>
+        </select>
         <input type="text" id="note-tag" placeholder="#tag" maxlength="60">
         <input type="text" id="note-project" placeholder="progetto" maxlength="60">
         <input type="text" id="note-assignee" placeholder="@persona" maxlength="60">
@@ -178,6 +196,18 @@
       <div id="notes-list"></div>
     </div>
 
+    <!-- Focus view -->
+    <div id="view-focus">
+      <div class="section-header">
+        <span class="section-title">Focus di oggi</span>
+        <span class="count-badge" id="focus-count">0</span>
+        <button onclick="loadFocus()" title="Aggiorna focus"
+          style="margin-left:auto;background:none;border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:0.7rem;color:var(--text-muted);cursor:pointer;">↻</button>
+      </div>
+      <div class="focus-summary" id="focus-summary"></div>
+      <div class="focus-grid" id="focus-grid"></div>
+    </div>
+
     <!-- Board view -->
     <div id="view-board">
       <div class="board-filters">
@@ -197,6 +227,70 @@
         <span class="count-badge" id="due-count">0</span>
       </div>
       <div id="due-list"></div>
+    </div>
+
+    <!-- Analisi tab -->
+    <div id="view-docs" style="display:none;">
+      <div class="doc-analysis-panel" style="height:calc(100vh - 120px);">
+        <!-- Left: selector -->
+        <div class="doc-analysis-left">
+          <div class="doc-analysis-section-title">Documenti disponibili</div>
+          <div id="doc-sel-count" style="font-size:0.7rem;color:var(--text-muted);margin-bottom:2px;">0 / 5 selezionati</div>
+          <div id="doc-selector-list" style="display:flex;flex-direction:column;gap:6px;flex:1;overflow-y:auto;"></div>
+          <div style="margin-top:8px;">
+            <div class="doc-analysis-section-title">Istruzioni aggiuntive</div>
+            <textarea class="doc-analysis-extra" id="doc-analysis-extra" rows="3"
+              placeholder="Es: focalizzati sui rischi, estrai le date chiave…"></textarea>
+          </div>
+          <div style="margin-top:8px;">
+            <div class="doc-analysis-section-title">Profondità analisi</div>
+            <div style="display:flex;gap:6px;margin-top:4px;" id="depth-selector">
+              <label style="flex:1;display:flex;align-items:center;gap:5px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:0.72rem;transition:all 0.15s;" id="depth-low">
+                <input type="radio" name="analysis-depth" value="low" style="accent-color:var(--accent);"> Bassa
+              </label>
+              <label style="flex:1;display:flex;align-items:center;gap:5px;padding:5px 8px;border:1px solid var(--accent);border-radius:6px;cursor:pointer;font-size:0.72rem;background:var(--accent-dim);transition:all 0.15s;" id="depth-medium">
+                <input type="radio" name="analysis-depth" value="medium" checked style="accent-color:var(--accent);"> Media
+              </label>
+              <label style="flex:1;display:flex;align-items:center;gap:5px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:0.72rem;transition:all 0.15s;" id="depth-high">
+                <input type="radio" name="analysis-depth" value="high" style="accent-color:var(--accent);"> Alta
+              </label>
+            </div>
+          </div>
+          <button class="doc-analyze-btn" id="doc-analyze-btn" onclick="runDocAnalysis()">🤖 Analizza</button>
+        </div>
+        <!-- Right: results -->
+        <div class="doc-analysis-right" id="doc-analysis-right">
+          <div class="doc-analysis-placeholder" id="doc-analysis-placeholder">
+            <span class="doc-analysis-placeholder-icon">🔍</span>
+            <span>Seleziona uno o più documenti<br>e clicca <strong>Analizza</strong></span>
+          </div>
+          <div class="doc-analysis-loading" id="doc-analysis-loading" style="display:none;">
+            <div class="doc-analysis-spinner"></div>
+            <span>Analisi in corso…</span>
+          </div>
+          <div id="doc-analysis-output" style="display:none;flex-direction:column;gap:14px;">
+            <div>
+              <div class="doc-analysis-section-title">Riepilogo</div>
+              <div class="doc-analysis-summary" id="doc-analysis-summary"></div>
+            </div>
+            <div id="doc-insights-wrap" style="display:none;">
+              <div class="doc-analysis-section-title">Punti chiave</div>
+              <ul class="doc-insights" id="doc-analysis-insights"></ul>
+            </div>
+            <div id="doc-items-wrap" style="display:none;">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                <div class="doc-analysis-section-title" style="margin-bottom:0;">Elementi suggeriti</div>
+                <label style="font-size:0.72rem;color:var(--text-muted);display:flex;align-items:center;gap:5px;cursor:pointer;">
+                  <input type="checkbox" id="doc-select-all" onchange="docSelectAll(this.checked)" style="accent-color:var(--accent);">
+                  seleziona tutti
+                </label>
+              </div>
+              <div id="doc-analysis-items" style="display:flex;flex-direction:column;gap:6px;"></div>
+              <button class="doc-create-btn" id="doc-create-btn" onclick="createDocItems()" style="margin-top:10px;">✓ Crea selezionati</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Gantt view -->
@@ -237,65 +331,18 @@
       <span style="font-size:0.8rem;font-weight:700;color:var(--text);">Recap & Impostazioni</span>
       <button class="sidebar-mobile-close" onclick="closeMobileSidebar()">✕</button>
     </div>
-    <div class="sidebar-section" style="padding-top:12px;padding-bottom:12px;">
-      <div style="display:flex;align-items:center;gap:8px;">
-        <span class="section-title">Modello AI</span>
-        <select id="model-select" style="margin-left:auto;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-family:inherit;font-size:0.75rem;padding:3px 8px;outline:none;cursor:pointer;" onchange="setModel(this.value)">
+
+    <!-- ── RECAP AI (sempre visibile) ─────────────────────── -->
+    <div class="sidebar-section">
+      <div class="section-header">
+        <span class="section-title">Recap AI</span>
+        <select id="model-select" style="margin-left:auto;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-family:inherit;font-size:0.72rem;padding:2px 6px;outline:none;cursor:pointer;" onchange="setModel(this.value)">
           <option value="claude-haiku-4-5-20251001">⚡ Haiku 4.5</option>
           <option value="claude-sonnet-4-6">✦ Sonnet 4.6</option>
           <option value="claude-opus-4-7">◆ Opus 4.7</option>
         </select>
-      </div>
-    </div>
-
-    <div class="sidebar-section" style="padding-top:12px;padding-bottom:12px;">
-      <div style="display:flex;align-items:center;gap:8px;">
-        <span class="section-title">⏰ Recap automatico</span>
-        <label style="margin-left:auto;display:flex;align-items:center;cursor:pointer;" title="Attiva/disattiva recap automatico">
-          <input type="checkbox" id="schedule-enabled" style="display:none" onchange="onScheduleToggle(this.checked)">
-          <span id="schedule-toggle-pill" style="display:inline-block;width:32px;height:18px;border-radius:9px;background:var(--surface2);border:1px solid var(--border);position:relative;transition:background 0.2s;">
-            <span style="position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--text-muted);transition:transform 0.2s,background 0.2s;" id="schedule-toggle-dot"></span>
-          </span>
-        </label>
-      </div>
-      <div id="schedule-last-run" style="display:none;margin-top:5px;font-size:0.72rem;"></div>
-      <div id="schedule-config" style="display:none;margin-top:10px;">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-          <span style="font-size:0.75rem;color:var(--text-muted);min-width:44px;">Orario</span>
-          <input type="time" id="schedule-time" value="08:00"
-            style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:0.8rem;padding:3px 8px;outline:none;flex:1;">
-        </div>
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
-          <span style="font-size:0.75rem;color:var(--text-muted);min-width:44px;">Tipo</span>
-          <div style="display:flex;gap:3px;">
-            <button type="button" id="sched-type-daily" onclick="setScheduleType('daily')" class="day-btn active" style="width:auto;padding:0 8px;border-radius:6px;">🤖 Daily</button>
-            <button type="button" id="sched-type-weekly" onclick="setScheduleType('weekly')" class="day-btn" style="width:auto;padding:0 8px;border-radius:6px;">📅 Weekly</button>
-          </div>
-        </div>
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;">
-          <span style="font-size:0.75rem;color:var(--text-muted);min-width:44px;">Giorni</span>
-          <div style="display:flex;gap:3px;" id="schedule-days">
-            <button type="button" data-day="0" onclick="toggleDay(this)" class="day-btn active">L</button>
-            <button type="button" data-day="1" onclick="toggleDay(this)" class="day-btn active">M</button>
-            <button type="button" data-day="2" onclick="toggleDay(this)" class="day-btn active">M</button>
-            <button type="button" data-day="3" onclick="toggleDay(this)" class="day-btn active">G</button>
-            <button type="button" data-day="4" onclick="toggleDay(this)" class="day-btn active">V</button>
-            <button type="button" data-day="5" onclick="toggleDay(this)" class="day-btn">S</button>
-            <button type="button" data-day="6" onclick="toggleDay(this)" class="day-btn">D</button>
-          </div>
-        </div>
-        <button onclick="saveSchedule()"
-          style="width:100%;background:var(--accent-dim);border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:4px 0;font-size:0.75rem;font-weight:600;cursor:pointer;font-family:inherit;">
-          Salva
-        </button>
-      </div>
-    </div>
-
-    <div class="sidebar-section">
-      <div class="section-header">
-        <span class="section-title">Recap AI</span>
-        <button id="gen-daily-btn" onclick="generateRecap()" title="Genera recap di oggi (salva automaticamente)" style="margin-left:auto;background:var(--accent-dim);border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:3px 10px;font-size:0.72rem;font-weight:600;cursor:pointer;transition:opacity 0.15s;">🤖 Daily</button>
-        <button id="gen-weekly-btn" onclick="generateWeeklyRecap()" title="Genera recap settimanale dagli ultimi 7 giorni di note" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:6px;padding:3px 10px;font-size:0.72rem;cursor:pointer;transition:all 0.15s;">📅 Weekly</button>
+        <button id="gen-daily-btn" onclick="generateRecap()" title="Genera recap di oggi" style="background:var(--accent-dim);border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:3px 10px;font-size:0.72rem;font-weight:600;cursor:pointer;transition:opacity 0.15s;">🤖 Daily</button>
+        <button id="gen-weekly-btn" onclick="generateWeeklyRecap()" title="Genera recap settimanale" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:6px;padding:3px 10px;font-size:0.72rem;cursor:pointer;transition:all 0.15s;">📅 Weekly</button>
       </div>
       <div id="recap-content">
         {% if recap %}
@@ -306,42 +353,7 @@
       </div>
     </div>
 
-    <div class="sidebar-section" id="ollama-section">
-      <div class="section-header">
-        <span class="section-title">🦙 Ollama</span>
-        <span id="ollama-status-dot" style="width:8px;height:8px;border-radius:50%;background:var(--border);flex-shrink:0;transition:background 0.3s;" title="Stato connessione"></span>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:8px;">
-        <label style="font-size:0.75rem;color:var(--text-muted);">URL server</label>
-        <input type="text" id="ollama-url-input" placeholder="http://localhost:11434"
-               style="background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:0.78rem;padding:5px 8px;outline:none;"
-               onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
-        <label style="font-size:0.75rem;color:var(--text-muted);">Modello</label>
-        <div style="display:flex;gap:6px;">
-          <input type="text" id="ollama-model-input" placeholder="llama3.2"
-                 style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:0.78rem;padding:5px 8px;outline:none;"
-                 onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
-          <button onclick="saveOllamaSettings()" style="background:var(--accent);color:#0d0f1a;border:none;border-radius:6px;padding:5px 12px;font-size:0.78rem;font-weight:700;cursor:pointer;">Salva</button>
-        </div>
-        <div id="ollama-models-hint" style="font-size:0.68rem;color:var(--text-dim);"></div>
-      </div>
-    </div>
-
-    <div class="sidebar-section">
-      <div class="section-header"><span class="section-title">📁 Documenti</span></div>
-      <div style="display:flex;flex-direction:column;gap:8px;">
-        <label style="font-size:0.75rem;color:var(--text-muted);">Cartella documenti</label>
-        <div style="display:flex;gap:6px;">
-          <input type="text" id="doc-root-input" placeholder="~/Documents/noted"
-                 style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:0.78rem;padding:5px 8px;outline:none;"
-                 onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
-          <button onclick="saveDocRoot()" style="background:var(--accent);color:#0d0f1a;border:none;border-radius:6px;padding:5px 12px;font-size:0.78rem;font-weight:700;cursor:pointer;">Salva</button>
-        </div>
-        <button onclick="openDocFolder()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:0.75rem;color:var(--text-muted);cursor:pointer;text-align:left;transition:all 0.15s;" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-muted)'">📂 Apri cartella in Finder</button>
-        <button onclick="openDocAnalysis()" style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:6px;padding:6px 10px;font-size:0.75rem;color:var(--accent);cursor:pointer;text-align:left;font-weight:600;transition:all 0.15s;">🔍 Analisi AI documenti</button>
-      </div>
-    </div>
-
+    <!-- ── ULTIMI RECAP (sempre visibile) ─────────────────── -->
     <div class="sidebar-section">
       <div class="section-header">
         <span class="section-title">Ultimi recap</span>
@@ -428,71 +440,95 @@
   </div>
 </div>
 
-<!-- Doc analysis modal -->
-<div class="modal-overlay" id="doc-analysis-modal" onclick="closeDocAnalysis(event)">
-  <div class="doc-analysis-panel">
-    <div class="doc-analysis-header">
-      <span>🔍 Analisi AI documenti</span>
-      <button onclick="closeDocAnalysis()">✕</button>
+<!-- Settings modal -->
+<div class="modal-overlay" id="settings-modal" onclick="closeSettings(event)">
+  <div class="modal" style="width:420px;max-width:95vw;max-height:85vh;overflow-y:auto;">
+    <div class="modal-title" style="display:flex;align-items:center;justify-content:space-between;">
+      <span>⚙ Impostazioni</span>
+      <button onclick="closeSettings()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1.1rem;line-height:1;">✕</button>
     </div>
-    <div class="doc-analysis-body">
-      <!-- Left: selector -->
-      <div class="doc-analysis-left">
-        <div class="doc-analysis-section-title">Documenti disponibili</div>
-        <div id="doc-sel-count" style="font-size:0.7rem;color:var(--text-muted);margin-bottom:2px;">0 / 5 selezionati</div>
-        <div id="doc-selector-list" style="display:flex;flex-direction:column;gap:6px;flex:1;overflow-y:auto;"></div>
-        <div style="margin-top:8px;">
-          <div class="doc-analysis-section-title">Istruzioni aggiuntive</div>
-          <textarea class="doc-analysis-extra" id="doc-analysis-extra" rows="3"
-            placeholder="Es: focalizzati sui rischi, estrai le date chiave, suggerisci milestone per Q3…"></textarea>
-        </div>
-        <div style="margin-top:8px;">
-          <div class="doc-analysis-section-title">Profondità analisi</div>
-          <div style="display:flex;gap:6px;margin-top:4px;" id="depth-selector">
-            <label style="flex:1;display:flex;align-items:center;gap:5px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:0.72rem;transition:all 0.15s;" id="depth-low">
-              <input type="radio" name="analysis-depth" value="low" style="accent-color:var(--accent);"> Bassa
-            </label>
-            <label style="flex:1;display:flex;align-items:center;gap:5px;padding:5px 8px;border:1px solid var(--accent);border-radius:6px;cursor:pointer;font-size:0.72rem;background:var(--accent-dim);transition:all 0.15s;" id="depth-medium">
-              <input type="radio" name="analysis-depth" value="medium" checked style="accent-color:var(--accent);"> Media
-            </label>
-            <label style="flex:1;display:flex;align-items:center;gap:5px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:0.72rem;transition:all 0.15s;" id="depth-high">
-              <input type="radio" name="analysis-depth" value="high" style="accent-color:var(--accent);"> Alta
-            </label>
-          </div>
-        </div>
-        <button class="doc-analyze-btn" id="doc-analyze-btn" onclick="runDocAnalysis()">🤖 Analizza</button>
+
+    <!-- Ollama -->
+    <div style="margin-bottom:20px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+        <span class="section-title">🦙 Ollama</span>
+        <span id="ollama-status-dot" style="width:7px;height:7px;border-radius:50%;background:var(--border);flex-shrink:0;transition:background 0.3s;" title="Stato connessione"></span>
       </div>
-      <!-- Right: results -->
-      <div class="doc-analysis-right" id="doc-analysis-right">
-        <div class="doc-analysis-placeholder" id="doc-analysis-placeholder">
-          <span class="doc-analysis-placeholder-icon">🔍</span>
-          <span>Seleziona uno o più documenti<br>e clicca <strong>Analizza</strong></span>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <label style="font-size:0.75rem;color:var(--text-muted);">URL server</label>
+        <input type="text" id="ollama-url-input" placeholder="http://localhost:11434"
+               style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:0.78rem;padding:6px 10px;outline:none;"
+               onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
+        <label style="font-size:0.75rem;color:var(--text-muted);">Modello</label>
+        <div style="display:flex;gap:6px;">
+          <input type="text" id="ollama-model-input" placeholder="llama3.2"
+                 style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:0.78rem;padding:6px 10px;outline:none;"
+                 onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
+          <button onclick="saveOllamaSettings()" style="background:var(--accent);color:#0d0f1a;border:none;border-radius:6px;padding:6px 14px;font-size:0.78rem;font-weight:700;cursor:pointer;">Salva</button>
         </div>
-        <div class="doc-analysis-loading" id="doc-analysis-loading" style="display:none;">
-          <div class="doc-analysis-spinner"></div>
-          <span>Analisi in corso…</span>
+        <div id="ollama-models-hint" style="font-size:0.68rem;color:var(--text-dim);"></div>
+      </div>
+    </div>
+
+    <div style="border-top:1px solid var(--border);margin-bottom:20px;"></div>
+
+    <!-- Recap automatico -->
+    <div style="margin-bottom:20px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+        <span class="section-title">⏰ Recap automatico</span>
+        <label style="margin-left:auto;display:flex;align-items:center;cursor:pointer;" title="Attiva/disattiva">
+          <input type="checkbox" id="schedule-enabled" style="display:none" onchange="onScheduleToggle(this.checked)">
+          <span id="schedule-toggle-pill" style="display:inline-block;width:32px;height:18px;border-radius:9px;background:var(--surface2);border:1px solid var(--border);position:relative;transition:background 0.2s;">
+            <span style="position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--text-muted);transition:transform 0.2s,background 0.2s;" id="schedule-toggle-dot"></span>
+          </span>
+        </label>
+      </div>
+      <div id="schedule-last-run" style="display:none;margin-bottom:8px;font-size:0.72rem;color:var(--text-muted);"></div>
+      <div id="schedule-config">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <span style="font-size:0.75rem;color:var(--text-muted);min-width:44px;">Orario</span>
+          <input type="time" id="schedule-time" value="08:00"
+            style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:0.8rem;padding:4px 8px;outline:none;flex:1;">
         </div>
-        <div id="doc-analysis-output" style="display:none;flex-direction:column;gap:14px;">
-          <div>
-            <div class="doc-analysis-section-title">Riepilogo</div>
-            <div class="doc-analysis-summary" id="doc-analysis-summary"></div>
-          </div>
-          <div id="doc-insights-wrap" style="display:none;">
-            <div class="doc-analysis-section-title">Punti chiave</div>
-            <ul class="doc-insights" id="doc-analysis-insights"></ul>
-          </div>
-          <div id="doc-items-wrap" style="display:none;">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-              <div class="doc-analysis-section-title" style="margin-bottom:0;">Elementi suggeriti</div>
-              <label style="font-size:0.72rem;color:var(--text-muted);display:flex;align-items:center;gap:5px;cursor:pointer;">
-                <input type="checkbox" id="doc-select-all" onchange="docSelectAll(this.checked)" style="accent-color:var(--accent);">
-                seleziona tutti
-              </label>
-            </div>
-            <div id="doc-analysis-items" style="display:flex;flex-direction:column;gap:6px;"></div>
-            <button class="doc-create-btn" id="doc-create-btn" onclick="createDocItems()" style="margin-top:10px;">✓ Crea selezionati</button>
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+          <span style="font-size:0.75rem;color:var(--text-muted);min-width:44px;">Tipo</span>
+          <div style="display:flex;gap:3px;">
+            <button type="button" id="sched-type-daily" onclick="setScheduleType('daily')" class="day-btn active" style="width:auto;padding:0 8px;border-radius:6px;">🤖 Daily</button>
+            <button type="button" id="sched-type-weekly" onclick="setScheduleType('weekly')" class="day-btn" style="width:auto;padding:0 8px;border-radius:6px;">📅 Weekly</button>
           </div>
         </div>
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;">
+          <span style="font-size:0.75rem;color:var(--text-muted);min-width:44px;">Giorni</span>
+          <div style="display:flex;gap:3px;" id="schedule-days">
+            <button type="button" data-day="0" onclick="toggleDay(this)" class="day-btn active">L</button>
+            <button type="button" data-day="1" onclick="toggleDay(this)" class="day-btn active">M</button>
+            <button type="button" data-day="2" onclick="toggleDay(this)" class="day-btn active">M</button>
+            <button type="button" data-day="3" onclick="toggleDay(this)" class="day-btn active">G</button>
+            <button type="button" data-day="4" onclick="toggleDay(this)" class="day-btn active">V</button>
+            <button type="button" data-day="5" onclick="toggleDay(this)" class="day-btn">S</button>
+            <button type="button" data-day="6" onclick="toggleDay(this)" class="day-btn">D</button>
+          </div>
+        </div>
+        <button onclick="saveSchedule()" style="width:100%;background:var(--accent-dim);border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:5px 0;font-size:0.75rem;font-weight:600;cursor:pointer;font-family:inherit;">
+          Salva schedule
+        </button>
+      </div>
+    </div>
+
+    <div style="border-top:1px solid var(--border);margin-bottom:20px;"></div>
+
+    <!-- Documenti -->
+    <div>
+      <div style="margin-bottom:10px;"><span class="section-title">📁 Documenti</span></div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <label style="font-size:0.75rem;color:var(--text-muted);">Cartella documenti</label>
+        <div style="display:flex;gap:6px;">
+          <input type="text" id="doc-root-input" placeholder="~/Documents/noted"
+                 style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:0.78rem;padding:6px 10px;outline:none;"
+                 onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
+          <button onclick="saveDocRoot()" style="background:var(--accent);color:#0d0f1a;border:none;border-radius:6px;padding:6px 14px;font-size:0.78rem;font-weight:700;cursor:pointer;">Salva</button>
+        </div>
+        <button onclick="openDocFolder()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:0.75rem;color:var(--text-muted);cursor:pointer;text-align:left;transition:all 0.15s;" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-muted)'">📂 Apri cartella in Finder</button>
       </div>
     </div>
   </div>
@@ -506,9 +542,14 @@
     <div class="shortcut-row"><span>Tab Oggi</span><kbd class="kbd">1</kbd></div>
     <div class="shortcut-row"><span>Tab Board</span><kbd class="kbd">2</kbd></div>
     <div class="shortcut-row"><span>Tab Scadenze</span><kbd class="kbd">3</kbd></div>
+    <div class="shortcut-row"><span>Tab Focus</span><kbd class="kbd">4</kbd></div>
+    <div class="shortcut-row"><span>Tab Gantt</span><kbd class="kbd">5</kbd></div>
+    <div class="shortcut-row"><span>Tab Analisi</span><kbd class="kbd">6</kbd></div>
+    <div class="shortcut-row"><span>Impostazioni</span><kbd class="kbd">,</kbd></div>
     <div class="shortcut-row"><span>Chiudi/Annulla</span><kbd class="kbd">Esc</kbd></div>
     <div class="shortcut-row"><span>Questa finestra</span><kbd class="kbd">?</kbd></div>
     <div style="margin-top:12px;font-size:0.72rem;color:var(--text-muted)">Nell'editor: <kbd class="kbd">Enter</kbd> salva · <kbd class="kbd">Shift+Enter</kbd> a capo · <kbd class="kbd">Esc</kbd> annulla</div>
+    <div style="margin-top:8px;font-size:0.72rem;color:var(--text-muted)">Menu bar: <kbd class="kbd">⌃⌥N</kbd> nuova nota da qualsiasi app</div>
   </div>
 </div>
 

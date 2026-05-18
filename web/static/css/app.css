@@ -227,6 +227,15 @@
   .sidebar-section { padding: 16px 18px; border-bottom: 1px solid var(--border); }
   .sidebar-section:last-child { border-bottom: none; flex: 1; }
 
+  /* Collapsible sections */
+  .sidebar-section.collapsible .section-header { cursor: pointer; user-select: none; }
+  .sidebar-section.collapsible .section-header:hover .section-title { color: var(--text); }
+  .sidebar-section-body { overflow: hidden; transition: max-height 0.2s ease, opacity 0.2s ease; }
+  .sidebar-section.collapsed .sidebar-section-body { max-height: 0 !important; opacity: 0; pointer-events: none; }
+  .sidebar-section:not(.collapsed) .sidebar-section-body { max-height: 600px; opacity: 1; }
+  .collapse-arrow { font-size: 0.65rem; color: var(--text-dim); margin-left: auto; transition: transform 0.2s; }
+  .sidebar-section:not(.collapsed) .collapse-arrow { transform: rotate(90deg); }
+
   /* ── Recap ───────────────────────────────────────────── */
   .recap-box {
     background: var(--bg);
@@ -288,7 +297,46 @@
   .theme-btn:hover { border-color: var(--border-hover); color: var(--text); }
 
   /* ── Due items view ──────────────────────────────────── */
-  #view-due { display: none; }
+  #view-focus, #view-due { display: none; }
+  .focus-summary {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px; margin-bottom: 14px;
+  }
+  .focus-stat {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px;
+  }
+  .focus-stat-num { font-size: 1.35rem; font-weight: 700; color: var(--text); line-height: 1; }
+  .focus-stat-label { font-size: 0.7rem; color: var(--text-muted); margin-top: 5px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .focus-grid {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px; align-items: start;
+  }
+  .focus-panel {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; min-width: 0; overflow: hidden;
+  }
+  .focus-panel-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px; border-bottom: 1px solid var(--border);
+  }
+  .focus-panel-title { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
+  .focus-panel-body { display: flex; flex-direction: column; gap: 7px; padding: 9px; }
+  .focus-card {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 9px 10px; border-left: 3px solid var(--border);
+  }
+  .focus-card.overdue { border-left-color: var(--red); }
+  .focus-card.today { border-left-color: var(--yellow); }
+  .focus-card.wip { border-left-color: var(--blue); }
+  .focus-card.inbox { border-left-color: var(--text-muted); }
+  .focus-card-title { font-size: 0.86rem; line-height: 1.4; color: var(--text); margin-bottom: 6px; cursor: text; }
+  .focus-card-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
+  .focus-action {
+    background: none; border: 1px solid var(--border); color: var(--text-muted);
+    border-radius: 6px; padding: 2px 7px; font-size: 0.68rem; cursor: pointer;
+  }
+  .focus-action:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
   .due-group-label {
     font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
     letter-spacing: 0.08em; color: var(--text-muted); padding: 14px 0 6px;
@@ -375,7 +423,7 @@
 
   /* ── Shortcuts modal ─────────────────────────────────── */
   .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 300; display: none; align-items: center; justify-content: center; }
-  .modal-overlay.show { display: flex; }
+  .modal-overlay.show, .modal-overlay.open { display: flex; }
   .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px 24px; min-width: 300px; box-shadow: 0 8px 40px rgba(0,0,0,0.4); }
   .modal-title { font-size: 0.85rem; font-weight: 700; margin-bottom: 14px; color: var(--text); }
   .shortcut-row { display: flex; align-items: center; justify-content: space-between; padding: 5px 0; font-size: 0.82rem; color: var(--text-muted); border-bottom: 1px solid var(--border); }
@@ -572,7 +620,7 @@
     display: none;
     position: fixed; bottom: 0; left: 0; right: 0;
     height: 56px; background: var(--surface); border-top: 1px solid var(--border);
-    z-index: 200; grid-template-columns: repeat(4, 1fr);
+    z-index: 200; grid-template-columns: repeat(5, 1fr);
   }
   .mobile-nav-btn {
     display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -646,6 +694,9 @@
     .add-form input[type="text"] { width: calc(50% - 4px); flex: none; }
     .add-btn { width: 100%; margin-left: 0; margin-top: 4px; padding: 10px; font-size: 0.9rem; }
 
+    /* Sidebar toggle visible on mobile */
+    #sidebar-toggle { display: flex; }
+
     /* Bottom nav visible */
     .mobile-bottom-nav { display: grid !important; }
 
@@ -665,6 +716,8 @@
     .board-container { grid-template-columns: repeat(7, min(220px, 78vw)); overflow-x: auto; padding-bottom: 8px; }
     .board-col { max-height: calc(100dvh - 185px); }
     .board-filters { gap: 6px; }
+    .focus-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .focus-grid { grid-template-columns: 1fr; }
 
     /* Due items */
     .due-item { padding: 12px 13px; }
@@ -705,7 +758,7 @@
   }
   #pwa-refresh:hover { border-color: var(--border-hover); color: var(--text); }
   #pwa-refresh.spinning { animation: spin 0.6s linear infinite; }
-  #sidebar-toggle { background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); width: 28px; height: 28px; border-radius: 6px; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+  #sidebar-toggle { background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); width: 28px; height: 28px; border-radius: 6px; cursor: pointer; font-size: 14px; display: none; align-items: center; justify-content: center; transition: all 0.15s; }
   #sidebar-toggle:hover { border-color: var(--border-hover); color: var(--text); }
   .ip-btn { background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); border-radius: 6px; padding: 0 8px; height: 28px; cursor: pointer; font-size: 0.68rem; font-family: monospace; transition: all 0.15s; white-space: nowrap; display: flex; align-items: center; gap: 4px; }
   .ip-btn:hover { border-color: var(--accent); color: var(--accent); }
@@ -789,27 +842,10 @@
   .doc-chip-add-hidden { opacity: 0; }
   .note-item:hover .doc-chip-add-hidden { opacity: 0.6; }
 
-  /* ── Doc analysis modal ──────────────────────────────── */
+  /* ── Doc analysis panel (tab) ───────────────────────── */
   .doc-analysis-panel {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 14px; width: min(900px, 96vw); max-height: 88vh;
-    display: flex; flex-direction: column;
-    box-shadow: 0 16px 60px rgba(0,0,0,0.5); overflow: hidden;
-  }
-  .doc-analysis-header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 16px 20px; border-bottom: 1px solid var(--border);
-    font-size: 0.9rem; font-weight: 700; color: var(--text); flex-shrink: 0;
-  }
-  .doc-analysis-header button {
-    background: none; border: none; color: var(--text-muted);
-    font-size: 18px; cursor: pointer; padding: 2px 6px; border-radius: 4px;
-    line-height: 1; transition: color 0.15s;
-  }
-  .doc-analysis-header button:hover { color: var(--text); }
-  .doc-analysis-body {
     display: grid; grid-template-columns: 280px 1fr;
-    flex: 1; overflow: hidden;
+    overflow: hidden; border: 1px solid var(--border); border-radius: 14px;
   }
   .doc-analysis-left {
     border-right: 1px solid var(--border); padding: 16px;
@@ -887,7 +923,6 @@
   }
   .doc-analysis-placeholder-icon { font-size: 2.5rem; opacity: 0.4; }
   @media (max-width: 768px) {
-    .doc-analysis-panel { width: 100%; max-height: 100%; border-radius: 0; }
-    .doc-analysis-body { grid-template-columns: 1fr; }
+    .doc-analysis-panel { grid-template-columns: 1fr; width: 100%; border-radius: 0; }
     .doc-analysis-left { border-right: none; border-bottom: 1px solid var(--border); max-height: 280px; }
   }

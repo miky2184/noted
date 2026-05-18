@@ -15,6 +15,25 @@ async def api_get_settings():
     return {"doc_root": get_doc_root()}
 
 
+@router.get("/api/settings/favorite-ctx")
+async def api_get_favorite_ctx():
+    from db.config import get_favorite_ctx
+    return {"favorite_ctx": get_favorite_ctx()}
+
+
+class FavoriteCtxUpdate(BaseModel):
+    name: str
+
+@router.patch("/api/settings/favorite-ctx")
+async def api_set_favorite_ctx(body: FavoriteCtxUpdate):
+    from db.config import set_favorite_ctx
+    name = body.name.strip().lower()
+    if not name:
+        raise HTTPException(status_code=400, detail="Nome contesto non valido")
+    set_favorite_ctx(name)
+    return {"ok": True, "favorite_ctx": name}
+
+
 class SettingsUpdate(BaseModel):
     doc_root: Optional[str] = None
 

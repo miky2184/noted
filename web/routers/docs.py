@@ -1,4 +1,6 @@
+import asyncio
 from datetime import date
+from functools import partial
 from pathlib import Path
 from typing import Optional
 
@@ -270,11 +272,16 @@ async def api_analyze_docs(request: Request, body: AnalyzeDocsRequest):
     content_parts.append({"type": "text", "text": user_text})
 
     try:
-        response = client.messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            system=_ANALYSIS_SYSTEM,
-            messages=[{"role": "user", "content": content_parts}],
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            partial(
+                client.messages.create,
+                model=model,
+                max_tokens=max_tokens,
+                system=_ANALYSIS_SYSTEM,
+                messages=[{"role": "user", "content": content_parts}],
+            ),
         )
         raw = response.content[0].text.strip()
         if raw.startswith("```"):

@@ -94,6 +94,16 @@ def set_ollama_model(model: str) -> None:
     data = _load(); data["ollama_model"] = model; _save(data)
 
 
+def get_favorite_ctx() -> str:
+    return _load().get("favorite_ctx", "default")
+
+
+def set_favorite_ctx(name: str) -> None:
+    data = _load()
+    data["favorite_ctx"] = name.strip().lower()
+    _save(data)
+
+
 def set_schedule(time_str: str | None, days: list[int] | None, recap_type: str = "daily") -> None:
     data = _load()
     if time_str is None:
