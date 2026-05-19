@@ -169,7 +169,7 @@
   .note-content {
     font-size: 0.88rem; color: var(--text); line-height: 1.55;
     cursor: text; border-radius: 4px; padding: 2px 4px; margin: -2px -4px;
-    transition: background 0.15s;
+    transition: background 0.15s; white-space: pre-wrap; word-break: break-word;
   }
   .note-content:hover { background: rgba(255,255,255,0.04); }
   .note-content[contenteditable="true"] {
