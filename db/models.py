@@ -5,7 +5,7 @@ import json
 
 
 PRIORITIES = ("low", "medium", "high")
-STATUSES = ("backlog", "todo", "wip", "waiting", "blocked", "done")
+STATUSES = ("backlog", "todo", "discuss", "wip", "waiting", "blocked", "done")
 
 class Context(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -26,6 +26,7 @@ class Note(SQLModel, table=True):
     sort_order: int = Field(default=0)
     created_at: datetime = Field(default_factory=datetime.now, index=True)
     updated_at: datetime = Field(default_factory=datetime.now)
+    milestone_id: Optional[int] = Field(default=None, foreign_key="milestone.id")
 
     def tags_list(self) -> list[str]:
         return [t.strip() for t in self.tags.split(",") if t.strip()]
@@ -55,6 +56,7 @@ class Milestone(SQLModel, table=True):
     name: str
     start_date: date
     end_date: date
+    note_id: Optional[int] = Field(default=None, foreign_key="note.id")
     created_at: datetime = Field(default_factory=datetime.now)
 
 

@@ -48,6 +48,34 @@ function _setLoading(delta) {
   document.getElementById('saving-dot')?.classList.toggle('active', _pendingRequests > 0);
 }
 
+// ── Assignee helpers ──────────────────────────────────────────────────────────
+function _parseAssignees(str) {
+  // Accepts "mario, luigi", "@mario @luigi", "mario luigi" → ["mario","luigi"]
+  if (!str) return [];
+  return str
+    .split(/[\s,]+/)
+    .map(a => a.replace(/^@/, '').trim().toLowerCase())
+    .filter(Boolean);
+}
+function _extractMentions(content) {
+  // Extract all @word from note content
+  return [...new Set((content.match(/@([\w.àèìòùÀÈÌÒÙáéíóú]+)/g) || []).map(m => m.slice(1).toLowerCase()))];
+}
+function _mergeAssignees(existing, fromContent) {
+  const all = [...new Set([..._parseAssignees(existing), ...fromContent])];
+  return all.join(',');
+}
+function _renderAssigneeBadges(assignee, noteId) {
+  const names = _parseAssignees(assignee);
+  if (!names.length) {
+    return `<span class="assignee-badge assignee-empty" onclick="editAssignee(this,${noteId},'')" title="Assegna a qualcuno">+@</span>`;
+  }
+  const encoded = escHtml(assignee);
+  return names.map(a =>
+    `<span class="assignee-badge" onclick="editAssignee(this,${noteId},'${encoded}')" title="Modifica assegnatari">@${escHtml(a)}</span>`
+  ).join('');
+}
+
 function apiFetch(url, opts = {}) {
   const sep = url.includes('?') ? '&' : '?';
   const isMutating = opts.method && opts.method !== 'GET';
@@ -377,7 +405,7 @@ function toast(msg, type = '') {
 }
 
 // ── Due notes ─────────────────────────────────────────────────────────────────
-const STATUS_LABEL = { backlog: '🗂 backlog', todo: '⬜ todo', wip: '🔄 wip', waiting: '⏳ waiting', blocked: '🚫 blocked', done: '✅ done' };
+const STATUS_LABEL = { backlog: '🗂 backlog', todo: '⬜ todo', discuss: '💬 discuss', wip: '🔄 wip', waiting: '⏳ waiting', blocked: '🚫 blocked', done: '✅ done' };
 
 async function loadDueNotes() {
   try {
@@ -420,9 +448,7 @@ function renderDueNotes(notes) {
       const projHtml = n.project
         ? `<span class="project-badge" onclick="editProject(this,${n.id},'${escHtml(n.project)}')" title="Modifica progetto">${escHtml(n.project)}</span>`
         : `<span class="project-badge project-empty" onclick="editProject(this,${n.id},'')" title="Aggiungi progetto">+progetto</span>`;
-      const assigneeHtml = n.assignee
-        ? `<span class="assignee-badge" onclick="editAssignee(this,${n.id},'${escHtml(n.assignee)}')" title="Modifica assegnatario">@${escHtml(n.assignee)}</span>`
-        : `<span class="assignee-badge assignee-empty" onclick="editAssignee(this,${n.id},'')" title="Assegna a qualcuno">+@</span>`;
+      const assigneeHtml = _renderAssigneeBadges(n.assignee, n.id);
       const tagsGroup = `<span class="tags-group" onclick="editTags(this,${n.id},'${escHtml(n.tags.join(','))}')" title="Modifica tag">${
         n.tags.length
           ? n.tags.map(t => `<span class="tag">#${escHtml(t)}</span>`).join('')
@@ -672,14 +698,18 @@ function renderNotes(notes) {
     const projHtml = n.project
       ? `<span class="project-badge" onclick="editProject(this,${n.id},'${escHtml(n.project)}')" title="Modifica progetto">${escHtml(n.project)}</span>`
       : `<span class="project-badge project-empty" onclick="editProject(this,${n.id},'')" title="Aggiungi progetto">+progetto</span>`;
-    const assigneeHtml = n.assignee
-      ? `<span class="assignee-badge" onclick="editAssignee(this,${n.id},'${escHtml(n.assignee)}')" title="Modifica assegnatario">@${escHtml(n.assignee)}</span>`
-      : `<span class="assignee-badge assignee-empty" onclick="editAssignee(this,${n.id},'')" title="Assegna a qualcuno">+@</span>`;
+    const msHtml = n.milestone_id
+      ? `<span class="milestone-badge" onclick="editMilestone(event,${n.id},${n.milestone_id},'${escHtml(n.project||'')}')">🏁 ms#${n.milestone_id}</span>`
+      : (n.project
+         ? `<span class="milestone-badge milestone-empty" onclick="editMilestone(event,${n.id},null,'${escHtml(n.project||'')}')">+ ms</span>`
+         : '');
+    const assigneeHtml = _renderAssigneeBadges(n.assignee, n.id);
     return `
     <div class="note-item" data-id="${n.id}">
       <div class="note-meta">
         <span class="note-time">${n.created_at.slice(11, 16)}</span>
         ${projHtml}
+        ${msHtml}
         ${tagsGroup}
         ${assigneeHtml}
         <span class="status ${n.status ? 'status-'+n.status : 'status-empty'}" onclick="cycleStatus(${n.id},'${n.status||''}')" title="Clicca per cambiare stato">${n.status ? STATUS_LABEL[n.status] : '+ stato'}</span>
@@ -890,7 +920,7 @@ document.getElementById('add-form').addEventListener('submit', async e => {
         content,
         tags: normalizeTags(document.getElementById('note-tag').value),
         project: document.getElementById('note-project').value.trim() ? normalizeProject(document.getElementById('note-project').value) : null,
-        assignee: document.getElementById('note-assignee').value.replace(/^@/, '').trim() || null,
+        assignee: _mergeAssignees(document.getElementById('note-assignee').value, _extractMentions(content)) || null,
         priority: document.getElementById('note-priority').value,
         due_date: document.getElementById('note-due').value || null,
         status: document.getElementById('note-status').value || null,
@@ -933,7 +963,7 @@ async function deleteNote(id) {
 }
 
 // ── Inline edit ──────────────────────────────────────────────────────────────
-const STATUS_CYCLE = [null, 'backlog', 'todo', 'wip', 'waiting', 'blocked', 'done'];
+const STATUS_CYCLE = [null, 'backlog', 'todo', 'discuss', 'wip', 'waiting', 'blocked', 'done'];
 
 function startEdit(el, noteId) {
   if (el.contentEditable === 'true') return;
@@ -954,7 +984,16 @@ function startEdit(el, noteId) {
     const newContent = el.textContent.trim();
     if (!newContent || newContent === original) { el.textContent = original; return; }
     try {
-      await patchNote(noteId, { content: newContent });
+      const mentions = _extractMentions(newContent);
+      const patch = { content: newContent };
+      if (mentions.length) {
+        // Find current assignee from rendered badge if present
+        const noteEl = el.closest('[data-id]');
+        const curAssignee = noteEl?.querySelector('.assignee-badge:not(.assignee-empty)')?.textContent?.replace(/^@/,'').trim() || '';
+        const merged = _mergeAssignees(curAssignee, mentions);
+        if (merged) patch.assignee = merged;
+      }
+      await patchNote(noteId, patch);
       toast('Nota aggiornata', 'success');
       await reloadActiveView();
     } catch {
@@ -1331,6 +1370,7 @@ function renderBoard(data) {
     { key: 'inbox',    label: '📥 Inbox',     color: 'var(--text-muted)' },
     { key: 'backlog',  label: '🗂 Backlog',   color: '#64748b' },
     { key: 'todo',     label: '⬜ Todo',      color: 'var(--blue)' },
+    { key: 'discuss',  label: '💬 Discuss',   color: '#22d3ee' },
     { key: 'wip',      label: '🔄 In corso',  color: 'var(--yellow)' },
     { key: 'waiting',  label: '⏳ Waiting',   color: '#a78bfa' },
     { key: 'blocked',  label: '🚫 Bloccati',  color: 'var(--red)' },
@@ -1404,13 +1444,13 @@ function initSortable() {
 }
 
 function boardCard(n, today, dimmed = false) {
-  const assigneeHtml = n.assignee ? `<span class="assignee-badge">@${escHtml(n.assignee)}</span>` : '';
+  const assigneeHtml = _parseAssignees(n.assignee).map(a => `<span class="assignee-badge">@${escHtml(a)}</span>`).join('');
   const projHtml = n.project ? `<span class="project-badge">${escHtml(n.project)}</span>` : '';
   const dueHtml = n.due_date ? `<span class="due-date ${n.due_date < today ? 'overdue' : (n.due_date === today ? 'soon' : '')}" style="font-size:0.65rem">📅 ${n.due_date}</span>` : '';
   const hideHtml = dimmed
     ? `<button class="hide-btn" style="opacity:1;color:var(--accent);margin-left:auto;" onclick="unhideNote(${n.id})" title="Mostra nota">👁</button>`
     : `<button class="hide-btn" onclick="hideNote(${n.id})" title="Nascondi nota">🙈</button>
-       <button class="delete-btn" onclick="deleteNote(${n.id})" title="Elimina" style="opacity:0">✕</button>`;
+       <button class="delete-btn" onclick="deleteNote(${n.id})" title="Elimina">✕</button>`;
   return `
   <div class="board-card priority-${n.priority}${dimmed ? ' shown-hidden' : ''}" data-id="${n.id}" style="${dimmed ? 'pointer-events:auto;' : ''}">
     <div class="board-card-content" onclick="startEdit(this,${n.id})" title="Clicca per modificare">${escHtml(n.content)}</div>
@@ -1475,20 +1515,31 @@ function editProject(el, noteId, currentProject) {
 }
 
 function editAssignee(el, noteId, currentAssignee) {
+  // Click on any of the multiple badges → edit the whole assignee string
+  // Find the container that holds all the badges for this note
+  const container = el.parentElement;
+  const allBadges = [...container.querySelectorAll('.assignee-badge')];
+
   const input = document.createElement('input');
   input.type = 'text';
-  input.value = currentAssignee;
-  input.placeholder = '@persona';
-  input.style.cssText = 'background:var(--surface2);border:1px solid var(--accent);border-radius:6px;color:var(--text);font-size:0.72rem;padding:2px 8px;outline:none;width:100px;';
-  el.replaceWith(input);
+  // Show as "@mario @luigi" for readability
+  const names = _parseAssignees(currentAssignee);
+  input.value = names.map(n => '@' + n).join(' ');
+  input.placeholder = '@persona1 @persona2';
+  input.style.cssText = 'background:var(--surface2);border:1px solid var(--accent);border-radius:6px;color:var(--text);font-size:0.72rem;padding:2px 8px;outline:none;width:140px;';
+  // Replace only the first badge, remove the rest
+  allBadges[0].replaceWith(input);
+  allBadges.slice(1).forEach(b => b.remove());
   input.focus();
   input.select();
+
   const reload = () => activeTab === 'due' ? loadDueNotes() : loadNotes();
   async function save() {
-    const val = input.value.trim().replace(/^@/, '');
+    const merged = _parseAssignees(input.value).join(',');
     try {
-      await patchNote(noteId, { assignee: val });
-      if (val) toast(`@${val}`); else toast('Assignee rimosso');
+      await patchNote(noteId, { assignee: merged });
+      if (merged) toast(merged.split(',').map(a=>'@'+a).join(' '), 'success');
+      else toast('Assignee rimosso');
     } catch { toast('Errore aggiornamento assignee', 'error'); }
     reload();
   }
@@ -1644,6 +1695,11 @@ function renderGanttPanel(data) {
             <div class="gantt-ms-body">
               <span>${escHtml(m.name)}</span>
               <span class="gantt-ms-dates">${m.start_date} → ${m.end_date}</span>
+              <span class="gantt-ms-progress-row" title="${m.progress_done || 0}/${m.progress_total || 0} note completate">
+                <span class="gantt-ms-progress"><span style="width:${m.progress || 0}%"></span></span>
+                <span class="gantt-ms-progress-label">${m.progress || 0}%</span>
+              </span>
+              ${m.linked_notes && m.linked_notes.length ? `<span style="font-size:0.62rem;background:var(--accent-dim);color:var(--accent);border-radius:4px;padding:1px 5px;margin-left:4px;">📎 ${m.linked_notes.length}</span>` : ''}
             </div>
             <button class="gantt-ms-del" onclick="deleteMilestone(${m.id},event)" title="Elimina">✕</button>
           </div>
@@ -1797,8 +1853,8 @@ function renderGanttChart(data) {
     const endExcl = new Date(m.end_date + 'T00:00:00'); endExcl.setDate(endExcl.getDate()+1);
     const width = Math.max(parseFloat(pct(_lds(endExcl))) - parseFloat(left), oneDayPct).toFixed(2);
     const col = p.color;
-    return `<div style="position:absolute;top:0;bottom:0;left:${left}%;width:${width}%;background:${col};opacity:0.10;pointer-events:none;z-index:0;"></div>
-            <div style="position:absolute;top:2px;left:${left}%;width:${width}%;font-size:0.6rem;font-weight:700;color:${col};opacity:0.7;text-align:center;pointer-events:none;z-index:1;overflow:hidden;white-space:nowrap;">${escHtml(p.name)}: ${escHtml(m.name)}</div>`;
+    return `<div class="gantt-bg-band" style="left:${left}%;width:${width}%;background:${col};border-color:${col};"></div>
+            <div class="gantt-bg-label" style="left:${left}%;width:${width}%;color:${col};">${escHtml(p.name)}: ${escHtml(m.name)}</div>`;
   })).join('');
 
   // Build rows (normal projects only)
@@ -1828,9 +1884,35 @@ function renderGanttChart(data) {
         <div class="gantt-row-track">
           <div class="gantt-track-bg"></div>
           ${todayLine}
-          <div class="gantt-bar" style="left:${barLeft}%;width:${barWidth}%;background:${p.color};${riskStyle}" title="${m.start_date} → ${m.end_date}">${escHtml(m.name)}${riskBadge}</div>
+          <div class="gantt-bar" style="left:${barLeft}%;width:${barWidth}%;background:${p.color};${riskStyle}" title="${m.start_date} → ${m.end_date} · ${m.progress || 0}% completato">
+            <span class="gantt-bar-progress" style="width:${m.progress || 0}%"></span>
+            <span class="gantt-bar-label">${escHtml(m.name)}${riskBadge} · ${m.progress || 0}%</span>
+          </div>
         </div>
       </div>`;
+      // Sub-task notes linked to this milestone
+      if (m.linked_notes && m.linked_notes.length) {
+        for (const ln of m.linked_notes) {
+          const lnDate = ln.due_date || ln.created_at;
+          const lnLeft = pct(lnDate);
+          const statusIcon = {todo:'⬜',discuss:'💬',wip:'🔄',done:'✅',waiting:'⏳',blocked:'🚫',backlog:'🗂'}[ln.status] || '·';
+          const doneStyle = ln.status === 'done' ? 'opacity:0.4;text-decoration:line-through' : '';
+          rowsHtml += `
+          <div class="gantt-row gantt-subnote-row">
+            <div class="gantt-row-label" style="${doneStyle};padding-left:18px;font-size:0.64rem;gap:4px;">
+              <span style="font-size:0.7em;">${statusIcon}</span>
+              <a href="#" onclick="goToNote(event,'${ln.created_at}')" title="${escHtml(ln.content)}"
+                 style="color:var(--text-dim);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                 onmouseover="this.style.color='var(--accent)'"
+                 onmouseout="this.style.color='var(--text-dim)'">${escHtml(ln.content.length > 30 ? ln.content.slice(0,30)+'…' : ln.content)}</a>
+            </div>
+            <div class="gantt-row-track" style="height:20px;">
+              ${todayLine}
+              <div class="gantt-subnote-pin" style="left:${lnLeft}%;background:${p.color};${ln.status==='done'?'opacity:0.35':''}" title="${escHtml(ln.content)} (${lnDate})"></div>
+            </div>
+          </div>`;
+        }
+      }
     }
 
     // One row per note with due_date
@@ -1910,6 +1992,57 @@ async function deleteGanttProject(id, e) {
     toast('Progetto eliminato');
     await loadGantt();
   } catch { toast('Errore eliminazione', 'error'); }
+}
+
+function editMilestone(e, noteId, currentMsId, project) {
+  e.stopPropagation();
+  const existing = document.getElementById('ms-picker');
+  if (existing) { const prev = existing._noteId; existing.remove(); if (prev === noteId) return; }
+  if (!project) { toast('Imposta prima un progetto sulla nota', 'info'); return; }
+
+  const btn = e.currentTarget;
+  const rect = btn.getBoundingClientRect();
+  const picker = document.createElement('div');
+  picker.id = 'ms-picker';
+  picker._noteId = noteId;
+  picker.style.cssText = `position:fixed;top:${rect.bottom + 4}px;left:${rect.left}px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:4px;z-index:1000;min-width:200px;box-shadow:0 4px 20px rgba(0,0,0,0.35);`;
+  picker.innerHTML = `
+    <div style="padding:3px 8px 5px;font-size:0.62rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Collega a milestone</div>
+    <div class="ms-pick-item${!currentMsId?' ms-pick-active':''}" onclick="setNoteMilestone(${noteId},null)">— nessuna</div>
+    <div id="ms-pick-body"><div style="padding:6px 10px;font-size:0.72rem;color:var(--text-muted);">Caricamento…</div></div>`;
+  document.body.appendChild(picker);
+
+  const closeHandler = (ev) => {
+    if (!picker.contains(ev.target)) { picker.remove(); document.removeEventListener('click', closeHandler); }
+  };
+  setTimeout(() => document.addEventListener('click', closeHandler), 0);
+
+  apiFetch(`/api/gantt/milestones/for-project?project=${encodeURIComponent(project)}`)
+    .then(r => r.json()).then(data => {
+      const body = document.getElementById('ms-pick-body');
+      if (!body) return;
+      if (!data.milestones.length) {
+        body.innerHTML = `<div style="padding:6px 10px;font-size:0.72rem;color:var(--text-muted);">Nessuna milestone per "${project}"</div>`;
+        return;
+      }
+      body.innerHTML = data.milestones.map(m =>
+        `<div class="ms-pick-item${m.id===currentMsId?' ms-pick-active':''}" onclick="setNoteMilestone(${noteId},${m.id})">🏁 ${escHtml(m.name)} <span style="opacity:0.5;font-size:0.68rem">→ ${m.end_date}</span></div>`
+      ).join('');
+    });
+}
+
+async function setNoteMilestone(noteId, milestoneId) {
+  const picker = document.getElementById('ms-picker');
+  if (picker) picker.remove();
+  try {
+    await apiFetch(`/api/notes/${noteId}`, {
+      method: 'PATCH',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(milestoneId ? {milestone_id: milestoneId} : {clear_milestone: true})
+    });
+    await loadNotes();
+    toast(milestoneId ? 'Nota collegata alla milestone' : 'Milestone rimossa', 'success');
+  } catch { toast('Errore', 'error'); }
 }
 
 async function addMilestone(e, projectId) {

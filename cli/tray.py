@@ -169,6 +169,12 @@ class NotedTrayApp(rumps.App):
         self._ctx = new_ctx
         for name, item in self._ctx_items.items():
             item.state = 1 if name == new_ctx else 0
+        # Persisti il contesto scelto come preferito
+        try:
+            from db.config import set_favorite_ctx
+            set_favorite_ctx(new_ctx)
+        except Exception:
+            pass
 
     # ── hotkey ──────────────────────────────────────────────────────────────
 

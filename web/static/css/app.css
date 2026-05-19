@@ -192,12 +192,13 @@
 
   /* ── Status ──────────────────────────────────────────── */
   .status { font-size: 0.68rem; font-weight: 600; padding: 1px 6px; border-radius: 8px; }
-  .status-backlog { background: rgba(100,116,139,0.15); color: #94a3b8; }
-  .status-todo    { background: rgba(96,165,250,0.12); color: var(--blue); }
-  .status-wip     { background: rgba(251,191,36,0.12); color: var(--yellow); }
-  .status-waiting { background: rgba(167,139,250,0.15); color: #a78bfa; }
-  .status-blocked { background: rgba(248,113,113,0.15); color: var(--red); }
-  .status-done    { background: rgba(52,211,153,0.12); color: var(--green); }
+  .status-backlog  { background: rgba(100,116,139,0.15); color: #94a3b8; }
+  .status-todo     { background: rgba(96,165,250,0.12); color: var(--blue); }
+  .status-discuss  { background: rgba(34,211,238,0.12); color: #22d3ee; }
+  .status-wip      { background: rgba(251,191,36,0.12); color: var(--yellow); }
+  .status-waiting  { background: rgba(167,139,250,0.15); color: #a78bfa; }
+  .status-blocked  { background: rgba(248,113,113,0.15); color: var(--red); }
+  .status-done     { background: rgba(52,211,153,0.12); color: var(--green); }
 
   /* ── Due date ────────────────────────────────────────── */
   .due-date { font-size: 0.68rem; color: var(--text-muted); display: flex; align-items: center; gap: 3px; }
@@ -410,7 +411,8 @@
   .board-card-meta { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 
   /* ── Assignee ────────────────────────────────────────── */
-  .assignee-badge { font-size: 0.65rem; background: var(--surface); border: 1px solid var(--border); color: var(--text-muted); padding: 1px 6px; border-radius: 8px; white-space: nowrap; }
+  .assignee-badge { font-size: 0.65rem; background: var(--surface); border: 1px solid var(--border); color: var(--text-muted); padding: 1px 6px; border-radius: 8px; white-space: nowrap; cursor: pointer; transition: border-color 0.15s, color 0.15s; }
+  .assignee-badge:hover { border-color: var(--accent); color: var(--accent); }
 
   /* ── Inline edit placeholders ────────────────────────── */
   .tag-empty { opacity: 0.35; border: 1px dashed var(--border) !important; background: none !important; }
@@ -531,6 +533,10 @@
   .gantt-ms-item:hover .gantt-ms-del { opacity: 1; }
   .gantt-ms-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
   .gantt-ms-dates { font-size: 0.68rem; color: var(--text-dim); }
+  .gantt-ms-progress-row { display: flex; align-items: center; gap: 5px; margin-top: 2px; }
+  .gantt-ms-progress { display: block; height: 4px; width: 72px; background: var(--surface2); border-radius: 999px; overflow: hidden; }
+  .gantt-ms-progress span { display: block; height: 100%; background: var(--green); border-radius: inherit; }
+  .gantt-ms-progress-label { font-size: 0.62rem; color: var(--text-muted); min-width: 26px; font-weight: 700; }
   .gantt-ms-del { opacity: 0; background: none; border: none; cursor: pointer; color: var(--text-dim); font-size: 11px; padding: 1px 3px; border-radius: 3px; margin-left: auto; transition: all 0.15s; }
   .gantt-ms-del:hover { color: var(--red); }
   .gantt-add-ms-form { padding: 4px 0 8px 26px; display: none; flex-direction: column; gap: 4px; }
@@ -566,6 +572,20 @@
   .gantt-day-mark.workday { color: var(--text-muted); }
   .gantt-day-mark.weekend { color: var(--accent); font-weight: 700; }
   .gantt-weekend-band { position: absolute; top: 0; bottom: 0; background: rgba(100,116,139,0.06); pointer-events: none; z-index: 0; }
+  .gantt-bg-band {
+    position: absolute; top: 0; bottom: 0;
+    opacity: 0.22; pointer-events: none; z-index: 0;
+    border-left: 2px solid; border-right: 2px solid;
+    box-shadow: inset 0 0 0 999px rgba(255,255,255,0.03);
+  }
+  .gantt-bg-label {
+    position: absolute; top: 2px;
+    font-size: 0.64rem; font-weight: 800;
+    opacity: 0.95; text-align: center;
+    pointer-events: none; z-index: 1;
+    overflow: hidden; white-space: nowrap;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.55);
+  }
 
   /* ── Dependencies ────────────────────────────────────── */
   .dep-chip { display: inline-flex; align-items: center; gap: 3px; font-size: 0.68rem; padding: 1px 6px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; transition: all 0.15s; line-height: 1.5; }
@@ -604,6 +624,8 @@
   .gantt-track-bg { position: absolute; inset: 0; background: var(--surface2); border-radius: 4px; opacity: 0.5; }
   .gantt-bar { position: absolute; height: 22px; top: 3px; border-radius: 5px; display: flex; align-items: center; padding: 0 8px; font-size: 0.68rem; font-weight: 600; color: #fff; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: default; min-width: 6px; transition: filter 0.15s; }
   .gantt-bar:hover { filter: brightness(1.15); }
+  .gantt-bar-progress { position: absolute; inset: 0 auto 0 0; background: rgba(255,255,255,0.24); pointer-events: none; }
+  .gantt-bar-label { position: relative; z-index: 1; overflow: hidden; text-overflow: ellipsis; }
   .gantt-today-line { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: var(--accent); opacity: 0.6; border-radius: 1px; pointer-events: none; z-index: 5; }
   /* Diamond: rotated square */
   .gantt-diamond { position: absolute; width: 10px; height: 10px; top: 9px; margin-left: -5px; transform: rotate(45deg); cursor: pointer; z-index: 10; transition: transform 0.15s; }
@@ -926,3 +948,41 @@
     .doc-analysis-panel { grid-template-columns: 1fr; width: 100%; border-radius: 0; }
     .doc-analysis-left { border-right: none; border-bottom: 1px solid var(--border); max-height: 280px; }
   }
+
+/* ── Milestone badge on notes ───────────────────────────────────── */
+.milestone-badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 1px 7px; border-radius: 5px;
+  font-size: 0.69rem; font-weight: 600; cursor: pointer;
+  background: rgba(139,92,246,0.12); color: #a78bfa;
+  border: 1px solid rgba(139,92,246,0.25);
+  transition: all 0.15s; white-space: nowrap;
+}
+.milestone-badge:hover { background: rgba(139,92,246,0.22); border-color: #a78bfa; }
+.milestone-badge.milestone-empty {
+  background: none; color: var(--text-dim); border-color: transparent; font-weight: 400;
+}
+.milestone-badge.milestone-empty:hover { border-color: var(--border); color: var(--text-muted); }
+
+/* ── Milestone picker dropdown ──────────────────────────────────── */
+.ms-pick-item {
+  padding: 5px 10px; border-radius: 6px; cursor: pointer;
+  font-size: 0.78rem; color: var(--text-muted); transition: all 0.1s;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ms-pick-item:hover { background: var(--surface2); color: var(--text); }
+.ms-pick-item.ms-pick-active { background: var(--accent-dim); color: var(--accent); }
+
+/* ── Gantt sub-note rows ────────────────────────────────────────── */
+.gantt-subnote-row .gantt-row-label {
+  display: flex; align-items: center; gap: 3px;
+  color: var(--text-dim); font-style: italic;
+}
+.gantt-subnote-row .gantt-row-track { opacity: 0.75; }
+.gantt-subnote-pin {
+  position: absolute; width: 8px; height: 8px;
+  border-radius: 50%; transform: translateX(-50%);
+  top: 50%; margin-top: -4px;
+  transition: transform 0.15s;
+}
+.gantt-subnote-pin:hover { transform: translateX(-50%) scale(1.5); }

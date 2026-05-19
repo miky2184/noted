@@ -130,6 +130,8 @@ def edit_note(
     clear_status: bool = False,
     assignee: Optional[str] = None,
     clear_assignee: bool = False,
+    milestone_id: Optional[int] = None,
+    clear_milestone: bool = False,
 ) -> Optional[Note]:
     note = session.get(Note, note_id)
     if not note:
@@ -154,6 +156,10 @@ def edit_note(
         note.assignee = None
     elif assignee is not None:
         note.assignee = assignee if assignee else None
+    if clear_milestone:
+        note.milestone_id = None
+    elif milestone_id is not None:
+        note.milestone_id = milestone_id
     note.updated_at = datetime.now()
     session.add(note)
     session.commit()
@@ -337,6 +343,18 @@ def get_milestones(session: Session, project_id: int) -> list[Milestone]:
         select(Milestone).where(Milestone.project_id == project_id).order_by(Milestone.start_date.asc())
     ).all()
 
+def get_milestones_by_project_name(session: Session, project_name: str, ctx: str = "default") -> list["Milestone"]:
+    from db.models import GanttProject
+    proj = session.exec(
+        select(GanttProject).where(
+            GanttProject.context == ctx,
+            GanttProject.name.ilike(project_name)
+        )
+    ).first()
+    if not proj:
+        return []
+    return get_milestones(session, proj.id)
+
 def add_gantt_project(session: Session, name: str, color: str = "#818cf8", ctx: str = "default", is_background: bool = False) -> GanttProject:
     p = GanttProject(name=name, color=color, context=ctx, is_background=is_background)
     session.add(p); session.commit(); session.refresh(p)
@@ -370,6 +388,15 @@ def edit_milestone(session: Session, milestone_id: int, name: Optional[str] = No
     if name is not None: m.name = name
     if start_date is not None: m.start_date = start_date
     if end_date is not None: m.end_date = end_date
+    if m.note_id:
+        note = session.get(Note, m.note_id)
+        if note:
+            if name is not None:
+                note.content = name
+            if end_date is not None:
+                note.due_date = end_date
+            note.updated_at = datetime.now()
+            session.add(note)
     session.add(m); session.commit(); session.refresh(m)
     return m
 
@@ -549,6 +576,7 @@ def get_gantt_data(session: Session, ctx: str = "default") -> dict:
             select(Note)
             .where(Note.due_date.isnot(None), Note.context == ctx)
             .where(Note.project.ilike(p.name))
+            .where(Note.milestone_id.is_(None))
             .where(~(Note.tags == "milestone"))
             .where(~Note.tags.ilike("milestone,%"))
             .where(~Note.tags.ilike("%,milestone"))
@@ -567,16 +595,58 @@ def get_gantt_data(session: Session, ctx: str = "default") -> dict:
             for n in all_proj_notes
         )
 
+        milestones_data = []
+        for m in milestones:
+            linked = session.exec(
+                select(Note).where(Note.milestone_id == m.id, Note.context == ctx)
+            ).all()
+            progress_notes = linked[:]
+            milestone_note = None
+            if m.note_id and not any(n.id == m.note_id for n in progress_notes):
+                milestone_note = session.get(Note, m.note_id)
+                if milestone_note and milestone_note.context == ctx:
+                    progress_notes.append(milestone_note)
+            if not m.note_id:
+                milestone_note = session.exec(
+                    select(Note)
+                    .where(Note.context == ctx, Note.project.ilike(p.name))
+                    .where(Note.content == m.name, Note.due_date == m.end_date)
+                    .where(or_(
+                        Note.tags == "milestone",
+                        Note.tags.ilike("milestone,%"),
+                        Note.tags.ilike("%,milestone"),
+                        Note.tags.ilike("%,milestone,%"),
+                    ))
+                ).first()
+                if milestone_note and not any(n.id == milestone_note.id for n in progress_notes):
+                    progress_notes.append(milestone_note)
+            progress_total = len(progress_notes)
+            progress_done = sum(1 for n in progress_notes if n.status == "done")
+            progress = round(progress_done / progress_total * 100) if progress_total else 0
+            milestones_data.append({
+                "id": m.id,
+                "name": m.name,
+                "start_date": str(m.start_date),
+                "end_date": str(m.end_date),
+                "note_id": m.note_id,
+                "progress": progress,
+                "progress_done": progress_done,
+                "progress_total": progress_total,
+                "linked_notes": [
+                    {"id": n.id, "content": n.content, "status": n.status,
+                     "due_date": str(n.due_date) if n.due_date else None,
+                     "created_at": n.created_at.date().isoformat()}
+                    for n in linked
+                ]
+            })
+
         result.append({
             "id": p.id,
             "name": p.name,
             "color": p.color,
             "is_background": p.is_background,
             "has_risk_blocker": has_risk_blocker,
-            "milestones": [
-                {"id": m.id, "name": m.name, "start_date": str(m.start_date), "end_date": str(m.end_date)}
-                for m in milestones
-            ],
+            "milestones": milestones_data,
             "notes": [
                 {"id": n.id, "content": n.content, "due_date": str(n.due_date), "status": n.status,
                  "assignee": n.assignee, "created_at": n.created_at.date().isoformat()}

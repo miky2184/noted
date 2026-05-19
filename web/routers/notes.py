@@ -72,6 +72,8 @@ class NoteUpdate(BaseModel):
     due_date: Optional[str] = None
     status: Optional[str] = None
     assignee: Optional[str] = None
+    milestone_id: Optional[int] = None
+    clear_milestone: bool = False
 
 
 @router.patch("/api/notes/{note_id}")
@@ -90,6 +92,8 @@ async def api_update_note(note_id: int, body: NoteUpdate):
             clear_status=body.status == "",
             assignee=body.assignee,
             clear_assignee=body.assignee == "",
+            milestone_id=body.milestone_id,
+            clear_milestone=body.clear_milestone,
         )
     if not note:
         raise HTTPException(status_code=404, detail="Nota non trovata")
@@ -201,7 +205,7 @@ async def api_board(
                                      assignee=assignee or None, ctx=ctx)
         inbox = crud.get_inbox_notes(session, days=7, project=project or None,
                                      assignee=assignee or None, ctx=ctx)
-    result = {"inbox": [], "backlog": [], "todo": [], "wip": [], "waiting": [], "blocked": [], "done": []}
+    result = {"inbox": [], "backlog": [], "todo": [], "discuss": [], "wip": [], "waiting": [], "blocked": [], "done": []}
     for n in inbox:
         result["inbox"].append(note_dict(n))
     for n in notes:

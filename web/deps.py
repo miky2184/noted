@@ -17,6 +17,7 @@ def note_dict(n):
         "due_date": str(n.due_date) if n.due_date else None,
         "status": n.status,
         "assignee": n.assignee,
+        "milestone_id": n.milestone_id,
         "created_at": n.created_at.isoformat(),
     }
 
@@ -35,4 +36,4 @@ def doc_dict(d):
 
 
 def get_ctx(request: Request) -> str:
-    return request.query_params.get("ctx", "default")
+    return request.query_params.get("ctx", "default").lower().strip()

@@ -85,6 +85,13 @@ def test_board_due_and_gantt_smoke(client):
     assert board.status_code == 200
     assert any(n["id"] == note["id"] for n in board.json()["todo"])
 
+    discuss_note = client.post(
+        "/api/notes?ctx=work",
+        json={"content": "discutere scope", "status": "discuss"},
+    ).json()
+    board = client.get("/api/board?ctx=work")
+    assert any(n["id"] == discuss_note["id"] for n in board.json()["discuss"])
+
     due = client.get("/api/notes/due?ctx=work")
     assert due.status_code == 200
     assert [n["id"] for n in due.json()] == [note["id"]]
@@ -109,6 +116,59 @@ def test_board_due_and_gantt_smoke(client):
     gantt = client.get("/api/gantt?ctx=work")
     assert gantt.status_code == 200
     assert gantt.json()["projects"][0]["milestones"][0]["name"] == "Release"
+    assert gantt.json()["projects"][0]["milestones"][0]["progress_total"] == 1
+
+    invalid_milestone = client.post(
+        "/api/gantt/milestones?ctx=work",
+        json={
+            "project_id": project.json()["id"],
+            "name": "Invalid",
+            "start_date": "2026-05-21",
+            "end_date": "2026-05-20",
+        },
+    )
+    assert invalid_milestone.status_code == 400
+
+    hidden_project = client.post(
+        "/api/gantt/projects?ctx=home",
+        json={"name": "HOME", "color": "#60a5fa"},
+    ).json()
+    cross_context = client.post(
+        "/api/gantt/milestones?ctx=work",
+        json={
+            "project_id": hidden_project["id"],
+            "name": "Cross context",
+            "start_date": "2026-05-16",
+            "end_date": "2026-05-20",
+        },
+    )
+    assert cross_context.status_code == 404
+
+    edited = client.patch(
+        f"/api/gantt/milestones/{milestone.json()['id']}?ctx=work",
+        json={"name": "Release finale", "end_date": "2026-05-22"},
+    )
+    assert edited.status_code == 200
+    due_after_edit = client.get("/api/notes/due?ctx=work")
+    assert any(n["content"] == "Release finale" and n["due_date"] == "2026-05-22" for n in due_after_edit.json())
+
+    linked_note = client.post(
+        "/api/notes?ctx=work",
+        json={
+            "content": "task collegato alla milestone",
+            "project": "ACME",
+            "status": "todo",
+            "due_date": "2026-05-21",
+        },
+    ).json()
+    client.patch(
+        f"/api/notes/{linked_note['id']}?ctx=work",
+        json={"milestone_id": milestone.json()["id"]},
+    )
+    gantt_after_link = client.get("/api/gantt?ctx=work").json()
+    milestone_data = gantt_after_link["projects"][0]["milestones"][0]
+    assert any(n["id"] == linked_note["id"] for n in milestone_data["linked_notes"])
+    assert all(n["id"] != linked_note["id"] for n in gantt_after_link["projects"][0]["notes"])
 
 
 def test_document_upload_list_download_and_delete(client, tmp_path):

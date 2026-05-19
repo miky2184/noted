@@ -157,12 +157,13 @@
         </select>
         <input type="text" id="note-tag" placeholder="#tag" maxlength="60">
         <input type="text" id="note-project" placeholder="progetto" maxlength="60">
-        <input type="text" id="note-assignee" placeholder="@persona" maxlength="60">
+        <input type="text" id="note-assignee" placeholder="@persona1 @persona2" maxlength="120">
         <input type="date" id="note-due" title="Scadenza" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-family:inherit;font-size:0.78rem;padding:4px 8px;outline:none;width:130px;transition:border-color 0.15s;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
         <select id="note-status" title="Stato" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-family:inherit;font-size:0.78rem;padding:4px 8px;outline:none;cursor:pointer;">
           <option value="">— stato</option>
           <option value="backlog">🗂 backlog</option>
           <option value="todo">⬜ todo</option>
+          <option value="discuss">💬 discuss</option>
           <option value="wip">🔄 wip</option>
           <option value="waiting">⏳ waiting</option>
           <option value="blocked">🚫 blocked</option>
