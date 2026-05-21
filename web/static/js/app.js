@@ -6,6 +6,7 @@ let activeTab = 'notes';
 const REFRESH_INTERVAL = 30000;
 let activeCtx = localStorage.getItem('noted-ctx') || window.NOTED_BOOT.activeCtx;
 let hideDone = localStorage.getItem('noted-hide-done') === '1';
+let pendingHighlightNoteId = null;
 
 // ── Per-note hide (localStorage, no DB) ───────────────────────────────────────
 function _hiddenKey() { return `noted-hidden-${activeCtx}`; }
@@ -554,14 +555,14 @@ function focusCard(n, kind) {
   const dueHtml = n.due_date ? `<span class="due-date ${n.due_date < window.NOTED_BOOT.today ? 'overdue' : 'soon'}">📅 ${n.due_date}</span>` : '';
   const statusHtml = n.status ? `<span class="status status-${n.status}">${STATUS_LABEL[n.status] || n.status}</span>` : `<span class="status status-empty">inbox</span>`;
   const nextAction = kind === 'inbox'
-    ? `<button class="focus-action" onclick="quickPatchFocus(${n.id},{status:'todo'})">todo</button>`
-    : `<button class="focus-action" onclick="quickPatchFocus(${n.id},{status:'done'})">done</button>`;
+    ? `<button class="focus-action" onclick="event.stopPropagation();quickPatchFocus(${n.id},{status:'todo'})">todo</button>`
+    : `<button class="focus-action" onclick="event.stopPropagation();quickPatchFocus(${n.id},{status:'done'})">done</button>`;
   return `
-    <article class="focus-card ${kind}" data-id="${n.id}">
-      <div class="focus-card-title" onclick="startEdit(this,${n.id})">${escHtml(n.content)}</div>
+    <article class="focus-card ${kind}" data-id="${n.id}" onclick="openNoteFromCard(event,${n.id},'${n.created_at}')">
+      <div class="focus-card-title" onclick="event.stopPropagation();startEdit(this,${n.id})">${escHtml(n.content)}</div>
       <div class="focus-card-meta">
         ${projHtml}${statusHtml}<span class="priority priority-${n.priority}">${n.priority}</span>${dueHtml}
-        <button class="focus-action" onclick="cycleStatus(${n.id},'${n.status || ''}')">stato</button>
+        <button class="focus-action" onclick="event.stopPropagation();cycleStatus(${n.id},'${n.status || ''}')">stato</button>
         ${nextAction}
       </div>
     </article>
@@ -776,6 +777,7 @@ function renderNotes(notes) {
       : '';
 
   list.innerHTML = noteCards + shownHiddenCards + doneChip + hiddenChip;
+  highlightPendingNote();
 
   if (!visible.length && hiddenDoneCount === 0 && hiddenCount === 0) {
     list.innerHTML = `<div class="empty">
@@ -1448,15 +1450,15 @@ function boardCard(n, today, dimmed = false) {
   const projHtml = n.project ? `<span class="project-badge">${escHtml(n.project)}</span>` : '';
   const dueHtml = n.due_date ? `<span class="due-date ${n.due_date < today ? 'overdue' : (n.due_date === today ? 'soon' : '')}" style="font-size:0.65rem">📅 ${n.due_date}</span>` : '';
   const hideHtml = dimmed
-    ? `<button class="hide-btn" style="opacity:1;color:var(--accent);margin-left:auto;" onclick="unhideNote(${n.id})" title="Mostra nota">👁</button>`
-    : `<button class="hide-btn" onclick="hideNote(${n.id})" title="Nascondi nota">🙈</button>
-       <button class="delete-btn" onclick="deleteNote(${n.id})" title="Elimina">✕</button>`;
+    ? `<button class="hide-btn" style="opacity:1;color:var(--accent);margin-left:auto;" onclick="event.stopPropagation();unhideNote(${n.id})" title="Mostra nota">👁</button>`
+    : `<button class="hide-btn" onclick="event.stopPropagation();hideNote(${n.id})" title="Nascondi nota">🙈</button>
+       <button class="delete-btn" onclick="event.stopPropagation();deleteNote(${n.id})" title="Elimina">✕</button>`;
   return `
-  <div class="board-card priority-${n.priority}${dimmed ? ' shown-hidden' : ''}" data-id="${n.id}" style="${dimmed ? 'pointer-events:auto;' : ''}">
-    <div class="board-card-content" onclick="startEdit(this,${n.id})" title="Clicca per modificare">${escHtml(n.content)}</div>
+  <div class="board-card priority-${n.priority}${dimmed ? ' shown-hidden' : ''}" data-id="${n.id}" onclick="openNoteFromCard(event,${n.id},'${n.created_at}')" style="${dimmed ? 'pointer-events:auto;' : ''}">
+    <div class="board-card-content" onclick="event.stopPropagation();startEdit(this,${n.id})" title="Clicca per modificare">${escHtml(n.content)}</div>
     <div class="board-card-meta">
       ${projHtml}${assigneeHtml}
-      <span class="status status-${n.status}" onclick="cycleStatus(${n.id},'${n.status||''}')" title="Avanza stato" style="cursor:pointer">${STATUS_LABEL[n.status]||''}</span>
+      <span class="status status-${n.status}" onclick="event.stopPropagation();cycleStatus(${n.id},'${n.status||''}')" title="Avanza stato" style="cursor:pointer">${STATUS_LABEL[n.status]||''}</span>
       ${dueHtml}
       <span style="margin-left:auto;display:flex;gap:4px;align-items:center;">${hideHtml}</span>
     </div>
@@ -1630,10 +1632,26 @@ function closeSettings(e) {
   document.getElementById('settings-modal').classList.remove('open');
 }
 
-function goToNote(e, dateStr) {
-  e.preventDefault();
+function goToNote(e, dateStr, noteId = null) {
+  if (e) e.preventDefault();
   switchTab('notes');
-  navigateToDate(dateStr);
+  if (noteId) pendingHighlightNoteId = noteId;
+  navigateToDate(String(dateStr).slice(0, 10));
+}
+
+function openNoteFromCard(e, noteId, createdAt) {
+  if (e?.target?.closest('button,input,select,textarea,a,[contenteditable="true"]')) return;
+  goToNote(e, createdAt, noteId);
+}
+
+function highlightPendingNote() {
+  if (!pendingHighlightNoteId) return;
+  const target = document.querySelector(`.note-item[data-id="${pendingHighlightNoteId}"]`);
+  if (!target) return;
+  pendingHighlightNoteId = null;
+  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  target.classList.add('note-highlight');
+  setTimeout(() => target.classList.remove('note-highlight'), 1800);
 }
 
 // ── Gantt ─────────────────────────────────────────────────────────────────────
