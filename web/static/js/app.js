@@ -1708,7 +1708,7 @@ function renderGanttPanel(data) {
       </div>
       <div class="gantt-milestones-list">
         ${p.milestones.map(m => `
-          <div class="gantt-ms-item" data-mid="${m.id}">
+          <div class="gantt-ms-item" data-mid="${m.id}" onclick="editGanttMilestone(${m.id})" title="Clicca per modificare date e nome">
             <span style="width:6px;height:6px;border-radius:50%;background:${p.color};flex-shrink:0;display:inline-block;margin-top:4px"></span>
             <div class="gantt-ms-body">
               <span>${escHtml(m.name)}</span>
@@ -1719,7 +1719,7 @@ function renderGanttPanel(data) {
               </span>
               ${m.linked_notes && m.linked_notes.length ? `<span style="font-size:0.62rem;background:var(--accent-dim);color:var(--accent);border-radius:4px;padding:1px 5px;margin-left:4px;">📎 ${m.linked_notes.length}</span>` : ''}
             </div>
-            <button class="gantt-ms-del" onclick="deleteMilestone(${m.id},event)" title="Elimina">✕</button>
+            <button class="gantt-ms-del" onclick="event.stopPropagation();deleteMilestone(${m.id},event)" title="Elimina">✕</button>
           </div>
         `).join('')}
       </div>
@@ -2081,6 +2081,61 @@ async function addMilestone(e, projectId) {
     toast('Milestone aggiunta', 'success');
     await loadGantt();
   } catch { toast('Errore', 'error'); }
+}
+
+function editGanttMilestone(milestoneId) {
+  if (!ganttData) return;
+  let milestone = null;
+  for (const project of ganttData.projects) {
+    milestone = project.milestones.find(m => m.id === milestoneId);
+    if (milestone) break;
+  }
+  if (!milestone) return;
+
+  const item = document.querySelector(`.gantt-ms-item[data-mid="${milestoneId}"]`);
+  if (!item || item.classList.contains('editing')) return;
+  item.classList.add('editing');
+  item.innerHTML = `
+    <form class="gantt-ms-edit-form" onsubmit="saveGanttMilestone(event,${milestoneId})">
+      <input class="gantt-input" name="name" value="${escHtml(milestone.name)}" maxlength="80" required>
+      <div class="gantt-ms-edit-dates">
+        <input class="gantt-input" type="date" name="start" value="${milestone.start_date}" required>
+        <input class="gantt-input" type="date" name="end" value="${milestone.end_date}" required>
+      </div>
+      <div class="gantt-ms-edit-actions">
+        <button type="submit" class="gantt-btn-sm">Salva</button>
+        <button type="button" class="gantt-btn-sm" onclick="event.stopPropagation();loadGantt()">Annulla</button>
+      </div>
+    </form>
+  `;
+  item.querySelector('input[name="start"]').focus();
+}
+
+async function saveGanttMilestone(e, milestoneId) {
+  e.preventDefault();
+  e.stopPropagation();
+  const form = e.target;
+  const name = form.name.value.trim();
+  const start = form.start.value;
+  const end = form.end.value;
+  if (!name || !start || !end) return;
+  try {
+    const res = await apiFetch(`/api/gantt/milestones/${milestoneId}`, {
+      method: 'PATCH',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({name, start_date: start, end_date: end}),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Errore');
+    }
+    toast('Milestone aggiornata', 'success');
+    await loadGantt();
+    if (activeTab === 'due') await loadDueNotes();
+    if (activeTab === 'focus') await loadFocus();
+  } catch(err) {
+    toast(err.message || 'Errore aggiornamento milestone', 'error');
+  }
 }
 
 async function deleteMilestone(id, e) {
