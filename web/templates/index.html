@@ -29,9 +29,7 @@
 
   <div class="tabs">
     <button class="tab-btn active" id="tab-notes" onclick="switchTab('notes')">📝 Oggi</button>
-    <button class="tab-btn" id="tab-focus" onclick="switchTab('focus')">🎯 Focus</button>
     <button class="tab-btn" id="tab-board" onclick="switchTab('board')">🗂 Board</button>
-    <button class="tab-btn" id="tab-due" onclick="switchTab('due')">📅 Scadenze</button>
     <button class="tab-btn" id="tab-gantt" onclick="switchTab('gantt')">📊 Gantt</button>
     <button class="tab-btn" id="tab-docs" onclick="switchTab('docs')">📎 Analisi</button>
   </div>
@@ -120,14 +118,6 @@
     <span class="mobile-nav-icon">🗂</span>
     <span class="mobile-nav-label">Board</span>
   </button>
-  <button class="mobile-nav-btn" id="mnav-focus" onclick="switchTab('focus')">
-    <span class="mobile-nav-icon">🎯</span>
-    <span class="mobile-nav-label">Focus</span>
-  </button>
-  <button class="mobile-nav-btn" id="mnav-due" onclick="switchTab('due')">
-    <span class="mobile-nav-icon">📅</span>
-    <span class="mobile-nav-label">Scadenze</span>
-  </button>
   <button class="mobile-nav-btn" id="mnav-gantt" onclick="switchTab('gantt')">
     <span class="mobile-nav-icon">📊</span>
     <span class="mobile-nav-label">Gantt</span>
@@ -197,18 +187,6 @@
       <div id="notes-list"></div>
     </div>
 
-    <!-- Focus view -->
-    <div id="view-focus">
-      <div class="section-header">
-        <span class="section-title">Focus di oggi</span>
-        <span class="count-badge" id="focus-count">0</span>
-        <button onclick="loadFocus()" title="Aggiorna focus"
-          style="margin-left:auto;background:none;border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:0.7rem;color:var(--text-muted);cursor:pointer;">↻</button>
-      </div>
-      <div class="focus-summary" id="focus-summary"></div>
-      <div class="focus-grid" id="focus-grid"></div>
-    </div>
-
     <!-- Board view -->
     <div id="view-board">
       <div class="board-filters">
@@ -219,15 +197,6 @@
         <div class="refresh-dot" id="board-refresh-dot" style="margin-left:auto"></div>
       </div>
       <div class="board-container" id="board-container"></div>
-    </div>
-
-    <!-- Due items view -->
-    <div id="view-due">
-      <div class="section-header">
-        <span class="section-title">Scadenze aperte</span>
-        <span class="count-badge" id="due-count">0</span>
-      </div>
-      <div id="due-list"></div>
     </div>
 
     <!-- Analisi tab -->
@@ -542,10 +511,8 @@
     <div class="shortcut-row"><span>Nuova nota</span><kbd class="kbd">N</kbd></div>
     <div class="shortcut-row"><span>Tab Oggi</span><kbd class="kbd">1</kbd></div>
     <div class="shortcut-row"><span>Tab Board</span><kbd class="kbd">2</kbd></div>
-    <div class="shortcut-row"><span>Tab Scadenze</span><kbd class="kbd">3</kbd></div>
-    <div class="shortcut-row"><span>Tab Focus</span><kbd class="kbd">4</kbd></div>
-    <div class="shortcut-row"><span>Tab Gantt</span><kbd class="kbd">5</kbd></div>
-    <div class="shortcut-row"><span>Tab Analisi</span><kbd class="kbd">6</kbd></div>
+    <div class="shortcut-row"><span>Tab Gantt</span><kbd class="kbd">3</kbd></div>
+    <div class="shortcut-row"><span>Tab Analisi</span><kbd class="kbd">4</kbd></div>
     <div class="shortcut-row"><span>Impostazioni</span><kbd class="kbd">,</kbd></div>
     <div class="shortcut-row"><span>Chiudi/Annulla</span><kbd class="kbd">Esc</kbd></div>
     <div class="shortcut-row"><span>Questa finestra</span><kbd class="kbd">?</kbd></div>

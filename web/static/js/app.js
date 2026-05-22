@@ -319,10 +319,11 @@ document.getElementById('theme-toggle').addEventListener('click', () => {
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 function switchTab(tab) {
+  if (tab === 'focus' || tab === 'due') tab = 'board';
   activeTab = tab;
   const isMobile = window.innerWidth <= 768;
 
-  ['notes', 'focus', 'board', 'due', 'gantt', 'docs'].forEach(t => {
+  ['notes', 'board', 'gantt', 'docs'].forEach(t => {
     const tabBtn = document.getElementById(`tab-${t}`);
     if (tabBtn) tabBtn.classList.toggle('active', t === tab);
     const mb = document.getElementById(`mnav-${t}`);
@@ -330,21 +331,19 @@ function switchTab(tab) {
   });
 
   document.getElementById('view-notes').style.display = tab === 'notes' ? 'block' : 'none';
-  document.getElementById('view-focus').style.display = tab === 'focus' ? 'block' : 'none';
   document.getElementById('view-board').style.display = tab === 'board' ? 'block' : 'none';
-  document.getElementById('view-due').style.display = tab === 'due' ? 'block' : 'none';
   document.getElementById('view-gantt').style.display = tab === 'gantt' ? 'block' : 'none';
   document.getElementById('view-docs').style.display = tab === 'docs' ? 'block' : 'none';
   document.getElementById('date-nav').style.display = tab === 'notes' ? '' : 'none';
   document.getElementById('filter-bar').style.display = 'none';
 
   if (isMobile) {
-    const showFab = (tab === 'notes' || tab === 'focus') && isToday(currentDate);
+    const showFab = tab === 'notes' && isToday(currentDate);
     const fab = document.getElementById('mobile-fab');
     if (fab) fab.style.display = showFab ? 'flex' : 'none';
     if (!showFab) closeNoteSheet();
   } else {
-    document.getElementById('add-form').style.display = ((tab === 'notes' || tab === 'focus') && isToday(currentDate)) ? '' : 'none';
+    document.getElementById('add-form').style.display = (tab === 'notes' && isToday(currentDate)) ? '' : 'none';
   }
 
   if (tab === 'gantt' || tab === 'docs') {
@@ -360,8 +359,6 @@ function switchTab(tab) {
       document.querySelector('.layout').style.gridTemplateColumns = '1fr 360px';
     }
   }
-  if (tab === 'focus') loadFocus();
-  if (tab === 'due') loadDueNotes();
   if (tab === 'board') loadBoard();
 }
 
@@ -1579,10 +1576,8 @@ document.addEventListener('keydown', e => {
   }
   if (e.key === '1') { e.preventDefault(); switchTab('notes'); }
   if (e.key === '2') { e.preventDefault(); switchTab('board'); }
-  if (e.key === '3') { e.preventDefault(); switchTab('due'); }
-  if (e.key === '4') { e.preventDefault(); switchTab('focus'); }
-  if (e.key === '5') { e.preventDefault(); switchTab('gantt'); }
-  if (e.key === '6') { e.preventDefault(); switchTab('docs'); }
+  if (e.key === '3') { e.preventDefault(); switchTab('gantt'); }
+  if (e.key === '4') { e.preventDefault(); switchTab('docs'); }
   if (e.key === ',') { e.preventDefault(); openSettings(); }
   if (e.key === '?') { e.preventDefault(); toggleShortcuts(); }
 });
@@ -2567,14 +2562,14 @@ function pwaRefresh() {
   btn.classList.add('spinning');
   const tab = document.getElementById('tab-notes')?.classList.contains('active') ? 'notes'
     : document.getElementById('tab-board')?.classList.contains('active') ? 'board'
-    : document.getElementById('tab-due')?.classList.contains('active') ? 'due'
     : document.getElementById('tab-gantt')?.classList.contains('active') ? 'gantt'
+    : document.getElementById('tab-docs')?.classList.contains('active') ? 'docs'
     : 'notes';
   const done = () => btn.classList.remove('spinning');
   if (tab === 'notes') loadNotes().finally(done);
-  else if (tab === 'board') { renderBoard(); done(); }
-  else if (tab === 'due') { renderDue(); done(); }
-  else if (tab === 'gantt') { renderGantt(); done(); }
+  else if (tab === 'board') loadBoard().finally(done);
+  else if (tab === 'gantt') loadGantt().finally(done);
+  else if (tab === 'docs') loadDocList().finally(done);
   else done();
 }
 
