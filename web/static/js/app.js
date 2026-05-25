@@ -1343,11 +1343,25 @@ async function setModel(modelId) {
 async function loadBoard() {
   const dot = document.getElementById('board-refresh-dot');
   if (dot) { dot.classList.add('active'); setTimeout(() => dot.classList.remove('active'), 600); }
+  const q = document.getElementById('board-q-filter').value.trim();
+  const tag = document.getElementById('board-tag-filter').value.trim().replace(/^#/, '');
   const project = document.getElementById('board-project-filter').value.trim();
   const assignee = document.getElementById('board-assignee-filter').value.trim();
+  const priority = document.getElementById('board-priority-filter').value;
+  const due = document.getElementById('board-due-filter').value;
+  const createdToday = document.getElementById('board-created-today-filter').checked;
+  const noProject = document.getElementById('board-no-project-filter').checked;
+  const noTag = document.getElementById('board-no-tag-filter').checked;
   const params = new URLSearchParams();
+  if (q) params.set('q', q);
+  if (tag) params.set('tag', tag);
   if (project) params.set('project', project);
   if (assignee) params.set('assignee', assignee);
+  if (priority) params.set('priority', priority);
+  if (due) params.set('due', due);
+  if (createdToday) params.set('created', 'today');
+  if (noProject) params.set('no_project', 'true');
+  if (noTag) params.set('no_tag', 'true');
   try {
     const res = await apiFetch('/api/board?' + params);
     const data = await res.json();
@@ -1356,8 +1370,15 @@ async function loadBoard() {
 }
 
 function clearBoardFilters() {
+  document.getElementById('board-q-filter').value = '';
+  document.getElementById('board-tag-filter').value = '';
   document.getElementById('board-project-filter').value = '';
   document.getElementById('board-assignee-filter').value = '';
+  document.getElementById('board-priority-filter').value = '';
+  document.getElementById('board-due-filter').value = '';
+  document.getElementById('board-created-today-filter').checked = false;
+  document.getElementById('board-no-project-filter').checked = false;
+  document.getElementById('board-no-tag-filter').checked = false;
   loadBoard();
 }
 

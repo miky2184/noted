@@ -171,13 +171,17 @@ def get_board_notes(
     session: Session,
     project: Optional[str] = None,
     assignee: Optional[str] = None,
+    tag: Optional[str] = None,
+    priority: Optional[str] = None,
+    query: Optional[str] = None,
+    created_today: bool = False,
+    due_filter: Optional[str] = None,
+    no_project: bool = False,
+    no_tag: bool = False,
     ctx: str = "default",
 ) -> list[Note]:
     stmt = select(Note).where(Note.status.isnot(None), Note.context == ctx)
-    if project:
-        stmt = stmt.where(Note.project.ilike(f"%{project}%"))
-    if assignee:
-        stmt = stmt.where(Note.assignee.ilike(f"%{assignee}%"))
+    stmt = _apply_board_filters(stmt, project, assignee, tag, priority, query, created_today, due_filter, no_project, no_tag)
     stmt = stmt.order_by(Note.sort_order.asc(), Note.created_at.desc()).limit(500)
     return session.exec(stmt).all()
 
@@ -187,6 +191,13 @@ def get_inbox_notes(
     days: int = 7,
     project: Optional[str] = None,
     assignee: Optional[str] = None,
+    tag: Optional[str] = None,
+    priority: Optional[str] = None,
+    query: Optional[str] = None,
+    created_today: bool = False,
+    due_filter: Optional[str] = None,
+    no_project: bool = False,
+    no_tag: bool = False,
     ctx: str = "default",
     limit: int = 50,
 ) -> list[Note]:
@@ -196,12 +207,64 @@ def get_inbox_notes(
         .where(Note.status.is_(None), Note.context == ctx)
         .where(Note.created_at >= since)
     )
-    if project:
-        stmt = stmt.where(Note.project.ilike(f"%{project}%"))
-    if assignee:
-        stmt = stmt.where(Note.assignee.ilike(f"%{assignee}%"))
+    stmt = _apply_board_filters(stmt, project, assignee, tag, priority, query, created_today, due_filter, no_project, no_tag)
     stmt = stmt.order_by(Note.sort_order.asc(), Note.created_at.desc()).limit(limit)
     return session.exec(stmt).all()
+
+
+def _apply_board_filters(
+    stmt,
+    project: Optional[str] = None,
+    assignee: Optional[str] = None,
+    tag: Optional[str] = None,
+    priority: Optional[str] = None,
+    query: Optional[str] = None,
+    created_today: bool = False,
+    due_filter: Optional[str] = None,
+    no_project: bool = False,
+    no_tag: bool = False,
+):
+    if no_project:
+        stmt = stmt.where(or_(Note.project.is_(None), Note.project == ""))
+    elif project:
+        stmt = stmt.where(Note.project.ilike(f"%{project}%"))
+    if assignee:
+        stmt = stmt.where(Note.assignee.ilike(f"%{assignee.lstrip('@')}%"))
+    if no_tag:
+        stmt = stmt.where(or_(Note.tags.is_(None), Note.tags == ""))
+    elif tag:
+        tag = tag.lstrip("#")
+        stmt = stmt.where(or_(
+            Note.tags == tag,
+            Note.tags.ilike(f"{tag},%"),
+            Note.tags.ilike(f"%,{tag}"),
+            Note.tags.ilike(f"%,{tag},%"),
+        ))
+    if priority:
+        stmt = stmt.where(Note.priority == priority)
+    if query:
+        q = f"%{query}%"
+        stmt = stmt.where(or_(
+            Note.content.ilike(q),
+            Note.tags.ilike(q),
+            Note.project.ilike(q),
+            Note.assignee.ilike(q),
+        ))
+    if created_today:
+        start = datetime.combine(date.today(), datetime.min.time())
+        end = datetime.combine(date.today(), datetime.max.time())
+        stmt = stmt.where(Note.created_at >= start, Note.created_at <= end)
+    if due_filter == "has":
+        stmt = stmt.where(Note.due_date.isnot(None))
+    elif due_filter == "none":
+        stmt = stmt.where(Note.due_date.is_(None))
+    elif due_filter == "overdue":
+        stmt = stmt.where(Note.due_date.isnot(None), Note.due_date < date.today())
+    elif due_filter == "today":
+        stmt = stmt.where(Note.due_date == date.today())
+    elif due_filter == "week":
+        stmt = stmt.where(Note.due_date.isnot(None), Note.due_date >= date.today(), Note.due_date <= date.today() + timedelta(days=7))
+    return stmt
 
 
 def get_notes_last_n_days(session: Session, days: int = 7, ctx: str = "default") -> list[Note]:

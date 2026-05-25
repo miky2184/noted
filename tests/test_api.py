@@ -171,6 +171,61 @@ def test_board_due_and_gantt_smoke(client):
     assert all(n["id"] != linked_note["id"] for n in gantt_after_link["projects"][0]["notes"])
 
 
+def test_board_filters(client):
+    alpha = client.post(
+        "/api/notes?ctx=work",
+        json={
+            "content": "preparare piano operativo ACME",
+            "project": "ACME",
+            "tags": "ops,cliente",
+            "priority": "high",
+            "status": "todo",
+            "due_date": "2026-06-01",
+            "assignee": "mario",
+        },
+    ).json()
+    beta = client.post(
+        "/api/notes?ctx=work",
+        json={
+            "content": "bozza interna",
+            "project": "BETA",
+            "tags": "draft",
+            "priority": "low",
+            "status": "todo",
+        },
+    ).json()
+    loose = client.post(
+        "/api/notes?ctx=work",
+        json={
+            "content": "nota da classificare",
+            "priority": "medium",
+            "status": "todo",
+        },
+    ).json()
+
+    by_tag = client.get("/api/board?ctx=work&tag=ops")
+    assert [n["id"] for n in by_tag.json()["todo"]] == [alpha["id"]]
+
+    by_priority = client.get("/api/board?ctx=work&priority=low")
+    assert [n["id"] for n in by_priority.json()["todo"]] == [beta["id"]]
+
+    by_query = client.get("/api/board?ctx=work&q=operativo")
+    assert [n["id"] for n in by_query.json()["todo"]] == [alpha["id"]]
+
+    by_due = client.get("/api/board?ctx=work&due=has")
+    assert [n["id"] for n in by_due.json()["todo"]] == [alpha["id"]]
+
+    created_today = client.get("/api/board?ctx=work&created=today")
+    ids = [n["id"] for n in created_today.json()["todo"]]
+    assert alpha["id"] in ids and beta["id"] in ids and loose["id"] in ids
+
+    no_project = client.get("/api/board?ctx=work&no_project=true")
+    assert [n["id"] for n in no_project.json()["todo"]] == [loose["id"]]
+
+    no_tag = client.get("/api/board?ctx=work&no_tag=true")
+    assert [n["id"] for n in no_tag.json()["todo"]] == [loose["id"]]
+
+
 def test_document_upload_list_download_and_delete(client, tmp_path):
     note = client.post("/api/notes?ctx=work", json={"content": "doc note", "project": "ACME"}).json()
 

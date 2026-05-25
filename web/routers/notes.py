@@ -196,15 +196,31 @@ async def api_remove_dep(note_id: int, blocker_id: int, request: Request):
 @router.get("/api/board")
 async def api_board(
     request: Request,
+    q: str = Query(None),
+    tag: str = Query(None),
     project: str = Query(None),
     assignee: str = Query(None),
+    priority: str = Query(None),
+    due: str = Query(None),
+    created: str = Query(None),
+    no_project: bool = Query(False),
+    no_tag: bool = Query(False),
 ):
     ctx = get_ctx(request)
+    created_today = created == "today"
     with get_session() as session:
         notes = crud.get_board_notes(session, project=project or None,
-                                     assignee=assignee or None, ctx=ctx)
+                                     assignee=assignee or None, tag=tag or None,
+                                     priority=priority or None, query=q or None,
+                                     created_today=created_today, due_filter=due or None,
+                                     no_project=no_project, no_tag=no_tag,
+                                     ctx=ctx)
         inbox = crud.get_inbox_notes(session, days=7, project=project or None,
-                                     assignee=assignee or None, ctx=ctx)
+                                     assignee=assignee or None, tag=tag or None,
+                                     priority=priority or None, query=q or None,
+                                     created_today=created_today, due_filter=due or None,
+                                     no_project=no_project, no_tag=no_tag,
+                                     ctx=ctx)
     result = {"inbox": [], "backlog": [], "todo": [], "discuss": [], "wip": [], "waiting": [], "blocked": [], "done": []}
     for n in inbox:
         result["inbox"].append(note_dict(n))

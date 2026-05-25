@@ -190,8 +190,36 @@
     <!-- Board view -->
     <div id="view-board">
       <div class="board-filters">
+        <input class="board-filter-input board-filter-wide" id="board-q-filter" placeholder="cerca nella board" onkeydown="if(event.key==='Enter') loadBoard()">
+        <input class="board-filter-input" id="board-tag-filter" placeholder="#tag" onkeydown="if(event.key==='Enter') loadBoard()">
         <input class="board-filter-input" id="board-project-filter" placeholder="filtra per progetto" onkeydown="if(event.key==='Enter') loadBoard()">
         <input class="board-filter-input" id="board-assignee-filter" placeholder="filtra per @persona" onkeydown="if(event.key==='Enter') loadBoard()">
+        <select class="board-filter-input" id="board-priority-filter" onchange="loadBoard()" title="Priorità">
+          <option value="">priorità</option>
+          <option value="high">high</option>
+          <option value="medium">medium</option>
+          <option value="low">low</option>
+        </select>
+        <select class="board-filter-input" id="board-due-filter" onchange="loadBoard()" title="Scadenza">
+          <option value="">scadenze</option>
+          <option value="overdue">scadute</option>
+          <option value="today">oggi</option>
+          <option value="week">prossimi 7 giorni</option>
+          <option value="has">con scadenza</option>
+          <option value="none">senza scadenza</option>
+        </select>
+        <label class="board-filter-check" title="Mostra solo note create oggi">
+          <input type="checkbox" id="board-created-today-filter" onchange="loadBoard()">
+          oggi
+        </label>
+        <label class="board-filter-check" title="Mostra note senza progetto">
+          <input type="checkbox" id="board-no-project-filter" onchange="loadBoard()">
+          no proj
+        </label>
+        <label class="board-filter-check" title="Mostra note senza tag">
+          <input type="checkbox" id="board-no-tag-filter" onchange="loadBoard()">
+          no tag
+        </label>
         <button onclick="loadBoard()" style="background:var(--accent-dim);border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:5px 12px;font-size:0.78rem;cursor:pointer;">Filtra</button>
         <button onclick="clearBoardFilters()" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:6px;padding:5px 10px;font-size:0.78rem;cursor:pointer;">✕</button>
         <div class="refresh-dot" id="board-refresh-dot" style="margin-left:auto"></div>
