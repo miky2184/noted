@@ -51,7 +51,33 @@ def _ensure_date_order(start: date, end: date) -> None:
 async def api_gantt(request: Request):
     ctx = get_ctx(request)
     with get_session() as session:
-        return crud.get_gantt_data(session, ctx=ctx)
+        data = crud.get_gantt_data(session, ctx=ctx)
+        archived = crud.get_archived_gantt_projects(session, ctx=ctx)
+        data["archived_projects"] = [
+            {"id": p.id, "name": p.name, "color": p.color}
+            for p in archived
+        ]
+        return data
+
+@router.patch("/api/gantt/projects/{project_id}/archive", status_code=200)
+async def api_archive_gantt_project(project_id: int, request: Request):
+    ctx = get_ctx(request)
+    with get_session() as session:
+        project = session.get(crud.GanttProject, project_id)
+        if not project or project.context != ctx:
+            raise HTTPException(status_code=404, detail="Progetto non trovato")
+        crud.archive_gantt_project(session, project_id)
+    return {"ok": True}
+
+@router.patch("/api/gantt/projects/{project_id}/unarchive", status_code=200)
+async def api_unarchive_gantt_project(project_id: int, request: Request):
+    ctx = get_ctx(request)
+    with get_session() as session:
+        project = session.get(crud.GanttProject, project_id)
+        if not project or project.context != ctx:
+            raise HTTPException(status_code=404, detail="Progetto non trovato")
+        crud.unarchive_gantt_project(session, project_id)
+    return {"ok": True}
 
 @router.post("/api/gantt/projects", status_code=201)
 async def api_add_gantt_project(request: Request, body: GanttProjectCreate):

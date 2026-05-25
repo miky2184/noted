@@ -398,8 +398,35 @@ def get_recent_recaps(session: Session, days: int = 90, ctx: str = "default") ->
 
 def get_gantt_projects(session: Session, ctx: str = "default") -> list[GanttProject]:
     return session.exec(
-        select(GanttProject).where(GanttProject.context == ctx).order_by(GanttProject.created_at.asc())
+        select(GanttProject)
+        .where(GanttProject.context == ctx, GanttProject.archived == False)
+        .order_by(GanttProject.created_at.asc())
     ).all()
+
+def get_archived_gantt_projects(session: Session, ctx: str = "default") -> list[GanttProject]:
+    return session.exec(
+        select(GanttProject)
+        .where(GanttProject.context == ctx, GanttProject.archived == True)
+        .order_by(GanttProject.created_at.asc())
+    ).all()
+
+def archive_gantt_project(session: Session, project_id: int) -> bool:
+    p = session.get(GanttProject, project_id)
+    if not p:
+        return False
+    p.archived = True
+    session.add(p)
+    session.commit()
+    return True
+
+def unarchive_gantt_project(session: Session, project_id: int) -> bool:
+    p = session.get(GanttProject, project_id)
+    if not p:
+        return False
+    p.archived = False
+    session.add(p)
+    session.commit()
+    return True
 
 def get_milestones(session: Session, project_id: int) -> list[Milestone]:
     return session.exec(

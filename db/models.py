@@ -47,6 +47,7 @@ class GanttProject(SQLModel, table=True):
     color: str = Field(default="#818cf8")
     context: str = Field(default="default")
     is_background: bool = Field(default=False)
+    archived: bool = Field(default=False)
     created_at: datetime = Field(default_factory=datetime.now)
 
 

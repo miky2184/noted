@@ -1714,12 +1714,31 @@ function renderGanttPanel(data) {
     list.innerHTML = '<div style="color:var(--text-dim);font-size:0.8rem;padding:8px 0">Nessun progetto. Aggiungine uno qui sotto.</div>';
     return;
   }
+  // Sezione archivio in fondo
+  const archivedHtml = (data.archived_projects && data.archived_projects.length) ? `
+    <div class="gantt-archive-section" id="gantt-archive-section">
+      <button class="gantt-archive-toggle" onclick="toggleGanttArchive()" id="gantt-archive-toggle">
+        📦 Archivio <span style="font-size:0.68rem;background:var(--surface2);border-radius:10px;padding:1px 7px;margin-left:4px;">${data.archived_projects.length}</span>
+        <span id="gantt-archive-chevron" style="margin-left:auto;font-size:0.7rem;color:var(--text-dim);">▶</span>
+      </button>
+      <div id="gantt-archive-list" style="display:none;flex-direction:column;gap:4px;padding:4px 0;">
+        ${data.archived_projects.map(p => `
+          <div class="gantt-archived-item">
+            <div class="gantt-project-dot" style="background:${p.color};opacity:0.5;"></div>
+            <span style="flex:1;font-size:0.78rem;color:var(--text-muted);">${escHtml(p.name)}</span>
+            <button onclick="unarchiveGanttProject(${p.id},event)" title="Ripristina progetto" style="background:none;border:1px solid var(--border);border-radius:5px;color:var(--text-muted);font-size:0.68rem;padding:2px 8px;cursor:pointer;transition:all 0.15s;" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-muted)'">↩ ripristina</button>
+          </div>
+        `).join('')}
+      </div>
+    </div>` : '';
+
   list.innerHTML = data.projects.map(p => `
     <div class="gantt-project-item">
       <div class="gantt-project-header">
         <div class="gantt-project-dot" style="background:${p.color}"></div>
         <span class="gantt-project-name">${escHtml(p.name)}</span>
         ${p.is_background ? `<span style="font-size:0.62rem;background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:1px 5px;color:var(--text-muted);margin-left:2px;">sfondo</span>` : ''}
+        <button class="gantt-project-archive" onclick="archiveGanttProject(${p.id},event)" title="Archivia progetto" style="opacity:0;transition:opacity 0.15s;">📦</button>
         <button class="gantt-project-del" onclick="deleteGanttProject(${p.id},event)" title="Elimina progetto">✕</button>
       </div>
       <div class="gantt-milestones-list">
@@ -1752,7 +1771,33 @@ function renderGanttPanel(data) {
         </div>
       </form>
     </div>
-  `).join('');
+  `).join('') + archivedHtml;
+}
+
+function toggleGanttArchive() {
+  const list = document.getElementById('gantt-archive-list');
+  const chevron = document.getElementById('gantt-archive-chevron');
+  const open = list.style.display === 'none';
+  list.style.display = open ? 'flex' : 'none';
+  chevron.textContent = open ? '▼' : '▶';
+}
+
+async function archiveGanttProject(id, e) {
+  e.stopPropagation();
+  try {
+    await apiFetch(`/api/gantt/projects/${id}/archive`, { method: 'PATCH' });
+    toast('Progetto archiviato', 'success');
+    await loadGantt();
+  } catch { toast('Errore', 'error'); }
+}
+
+async function unarchiveGanttProject(id, e) {
+  e.stopPropagation();
+  try {
+    await apiFetch(`/api/gantt/projects/${id}/unarchive`, { method: 'PATCH' });
+    toast('Progetto ripristinato', 'success');
+    await loadGantt();
+  } catch { toast('Errore', 'error'); }
 }
 
 function toggleAddMilestone(projectId, btn) {
