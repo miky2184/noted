@@ -19,6 +19,14 @@
 </head>
 <body>
 
+<!-- Update banner -->
+<div id="update-banner" style="display:none;background:linear-gradient(90deg,var(--accent-dim),rgba(99,102,241,0.08));border-bottom:1px solid var(--accent);padding:6px 20px;align-items:center;gap:10px;font-size:0.78rem;">
+  <span>🆕</span>
+  <span id="update-banner-text"></span>
+  <a id="update-banner-link" href="#" target="_blank" style="color:var(--accent);font-weight:600;text-decoration:none;">→ Release notes</a>
+  <button onclick="document.getElementById('update-banner').style.display='none'" style="margin-left:auto;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1rem;">✕</button>
+</div>
+
 <div id="ptr-indicator"><div class="ptr-spinner"></div><span>Rilascia per aggiornare</span></div>
 
 <div class="header">
@@ -32,6 +40,7 @@
     <button class="tab-btn" id="tab-board" onclick="switchTab('board')">🗂 Board</button>
     <button class="tab-btn" id="tab-gantt" onclick="switchTab('gantt')">📊 Gantt</button>
     <button class="tab-btn" id="tab-docs" onclick="switchTab('docs')">📎 Analisi</button>
+    <button class="tab-btn" id="tab-editor" onclick="switchTab('editor')">✍️ Editor</button>
   </div>
 
   <div class="date-nav" id="date-nav">
@@ -125,6 +134,10 @@
   <button class="mobile-nav-btn" id="mnav-docs" onclick="switchTab('docs')">
     <span class="mobile-nav-icon">📎</span>
     <span class="mobile-nav-label">Analisi</span>
+  </button>
+  <button class="mobile-nav-btn" id="mnav-editor" onclick="switchTab('editor')">
+    <span class="mobile-nav-icon">✍️</span>
+    <span class="mobile-nav-label">Editor</span>
   </button>
 </nav>
 
@@ -287,6 +300,41 @@
               <button class="doc-create-btn" id="doc-create-btn" onclick="createDocItems()" style="margin-top:10px;">✓ Crea selezionati</button>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Editor tab -->
+    <div id="view-editor" style="display:none;height:calc(100vh - 52px);flex-direction:column;">
+      <!-- Toolbar -->
+      <div class="editor-toolbar" id="editor-toolbar">
+        <button class="editor-tb-btn" onclick="editorCmd('bold')" title="Grassetto"><b>B</b></button>
+        <button class="editor-tb-btn" onclick="editorCmd('italic')" title="Corsivo"><i>I</i></button>
+        <span class="editor-tb-sep"></span>
+        <button class="editor-tb-btn" onclick="editorCmd('h1')" title="Titolo 1">H1</button>
+        <button class="editor-tb-btn" onclick="editorCmd('h2')" title="Titolo 2">H2</button>
+        <button class="editor-tb-btn" onclick="editorCmd('h3')" title="Titolo 3">H3</button>
+        <span class="editor-tb-sep"></span>
+        <button class="editor-tb-btn" onclick="editorCmd('ul')" title="Lista puntata">• lista</button>
+        <button class="editor-tb-btn" onclick="editorCmd('ol')" title="Lista numerata">1. lista</button>
+        <button class="editor-tb-btn" onclick="editorCmd('code')" title="Codice">&lt;/&gt;</button>
+        <button class="editor-tb-btn" onclick="editorCmd('table')" title="Tabella">⊞</button>
+        <span class="editor-tb-sep"></span>
+        <input type="text" id="editor-filename" placeholder="Nome file (opzionale)" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:0.75rem;padding:4px 10px;outline:none;width:180px;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
+        <span class="editor-tb-sep"></span>
+        <button class="editor-tb-btn editor-tb-export" onclick="editorExport('docx')" title="Esporta DOCX">📎 DOCX</button>
+        <button class="editor-tb-btn editor-tb-export" onclick="editorExport('pdf')" title="Esporta PDF">📄 PDF</button>
+        <button class="editor-tb-btn" onclick="editorClear()" title="Nuovo documento" style="margin-left:auto;color:var(--text-dim);">✕ nuovo</button>
+      </div>
+      <!-- Split pane -->
+      <div class="editor-split">
+        <div class="editor-pane editor-pane-write">
+          <div class="editor-pane-label">Markdown</div>
+          <textarea id="editor-textarea" placeholder="# Titolo&#10;&#10;Scrivi qui in **markdown**…" spellcheck="false"></textarea>
+        </div>
+        <div class="editor-pane editor-pane-preview">
+          <div class="editor-pane-label">Preview</div>
+          <div id="editor-preview" class="editor-preview-content"></div>
         </div>
       </div>
     </div>
@@ -541,6 +589,7 @@
     <div class="shortcut-row"><span>Tab Board</span><kbd class="kbd">2</kbd></div>
     <div class="shortcut-row"><span>Tab Gantt</span><kbd class="kbd">3</kbd></div>
     <div class="shortcut-row"><span>Tab Analisi</span><kbd class="kbd">4</kbd></div>
+    <div class="shortcut-row"><span>Tab Editor</span><kbd class="kbd">7</kbd></div>
     <div class="shortcut-row"><span>Impostazioni</span><kbd class="kbd">,</kbd></div>
     <div class="shortcut-row"><span>Chiudi/Annulla</span><kbd class="kbd">Esc</kbd></div>
     <div class="shortcut-row"><span>Questa finestra</span><kbd class="kbd">?</kbd></div>

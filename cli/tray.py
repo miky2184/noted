@@ -132,6 +132,9 @@ class NotedTrayApp(rumps.App):
 
         self._build_menu()
 
+        # Check update in background
+        threading.Thread(target=self._check_update, daemon=True).start()
+
         self._poll_timer = rumps.Timer(self._poll, 0.15)
         self._poll_timer.start()
 
@@ -173,6 +176,19 @@ class NotedTrayApp(rumps.App):
         try:
             from db.config import set_favorite_ctx
             set_favorite_ctx(new_ctx)
+        except Exception:
+            pass
+
+    def _check_update(self):
+        try:
+            from web.routers.version import check_for_update
+            result = check_for_update()
+            if result.get("has_update"):
+                rumps.notification(
+                    title="noted — aggiornamento disponibile",
+                    subtitle=f"Versione {result['latest']} disponibile",
+                    message=f"Versione attuale: {result['current']} · aggiorna con: pip install -e . --upgrade",
+                )
         except Exception:
             pass
 

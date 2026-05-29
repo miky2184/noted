@@ -11,11 +11,26 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from db import crud
 from db.engine import get_session, init_db
 from web.deps import get_ctx, templates
-from web.routers import backup, contexts, docs, gantt, notes, recaps, settings, voice, ollama
+from web.routers import backup, contexts, docs, editor, gantt, notes, recaps, settings, voice, ollama, version
 from web.services.scheduler_service import lifespan
 
 
 app = FastAPI(title="noted dashboard", lifespan=lifespan)
+
+
+@app.on_event("startup")
+async def _startup_update_check():
+    import asyncio
+
+    async def _check():
+        try:
+            loop = asyncio.get_event_loop()
+            from web.routers.version import check_for_update
+            await loop.run_in_executor(None, check_for_update)
+        except Exception:
+            pass
+
+    asyncio.create_task(_check())
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 init_db()
@@ -29,6 +44,8 @@ app.include_router(recaps.router)
 app.include_router(backup.router)
 app.include_router(voice.router)
 app.include_router(ollama.router)
+app.include_router(editor.router)
+app.include_router(version.router)
 
 
 @app.get("/", response_class=HTMLResponse)

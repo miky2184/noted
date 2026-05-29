@@ -323,7 +323,7 @@ function switchTab(tab) {
   activeTab = tab;
   const isMobile = window.innerWidth <= 768;
 
-  ['notes', 'board', 'gantt', 'docs'].forEach(t => {
+  ['notes', 'board', 'gantt', 'docs', 'editor'].forEach(t => {
     const tabBtn = document.getElementById(`tab-${t}`);
     if (tabBtn) tabBtn.classList.toggle('active', t === tab);
     const mb = document.getElementById(`mnav-${t}`);
@@ -334,6 +334,7 @@ function switchTab(tab) {
   document.getElementById('view-board').style.display = tab === 'board' ? 'block' : 'none';
   document.getElementById('view-gantt').style.display = tab === 'gantt' ? 'block' : 'none';
   document.getElementById('view-docs').style.display = tab === 'docs' ? 'block' : 'none';
+  document.getElementById('view-editor').style.display = tab === 'editor' ? 'flex' : 'none';
   document.getElementById('date-nav').style.display = tab === 'notes' ? '' : 'none';
   document.getElementById('filter-bar').style.display = 'none';
 
@@ -346,13 +347,14 @@ function switchTab(tab) {
     document.getElementById('add-form').style.display = (tab === 'notes' && isToday(currentDate)) ? '' : 'none';
   }
 
-  if (tab === 'gantt' || tab === 'docs') {
+  if (tab === 'gantt' || tab === 'docs' || tab === 'editor') {
     if (!isMobile) {
       document.querySelector('.sidebar').style.display = 'none';
       document.querySelector('.layout').style.gridTemplateColumns = '1fr';
     }
     if (tab === 'gantt') loadGantt();
     if (tab === 'docs') loadDocList();
+    if (tab === 'editor') initEditor();
   } else {
     if (!isMobile) {
       document.querySelector('.sidebar').style.display = '';
@@ -1599,6 +1601,7 @@ document.addEventListener('keydown', e => {
   if (e.key === '2') { e.preventDefault(); switchTab('board'); }
   if (e.key === '3') { e.preventDefault(); switchTab('gantt'); }
   if (e.key === '4') { e.preventDefault(); switchTab('docs'); }
+  if (e.key === '7') { e.preventDefault(); switchTab('editor'); }
   if (e.key === ',') { e.preventDefault(); openSettings(); }
   if (e.key === '?') { e.preventDefault(); toggleShortcuts(); }
 });
@@ -2424,13 +2427,28 @@ document.getElementById('attach-input').addEventListener('change', e => {
 function _renderAttachPreview() {
   const el = document.getElementById('attach-preview');
   if (!el) return;
-  el.innerHTML = _pendingFiles.map((f, i) => `
-    <span class="attach-chip">
-      ${_fileIcon(f.type, f.name)}
-      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(f.name)}</span>
-      <button type="button" onclick="_removeAttach(${i})" style="background:none;border:none;cursor:pointer;color:var(--text-dim);padding:0;font-size:11px;flex-shrink:0;">×</button>
-    </span>
-  `).join('');
+  // Revoke previous object URLs to avoid memory leaks
+  el.querySelectorAll('img[data-obj-url]').forEach(img => URL.revokeObjectURL(img.src));
+  el.innerHTML = _pendingFiles.map((f, i) => {
+    if (f.type.startsWith('image/')) {
+      const objUrl = URL.createObjectURL(f);
+      return `
+        <span class="attach-chip" style="align-items:center;">
+          <img data-obj-url="1" src="${escHtml(objUrl)}" alt="${escHtml(f.name)}"
+               style="height:40px;width:auto;max-width:80px;object-fit:cover;border-radius:4px;flex-shrink:0;">
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(f.name)}</span>
+          <button type="button" onclick="_removeAttach(${i})" style="background:none;border:none;cursor:pointer;color:var(--text-dim);padding:0;font-size:11px;flex-shrink:0;">×</button>
+        </span>
+      `;
+    }
+    return `
+      <span class="attach-chip">
+        ${_fileIcon(f.type, f.name)}
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(f.name)}</span>
+        <button type="button" onclick="_removeAttach(${i})" style="background:none;border:none;cursor:pointer;color:var(--text-dim);padding:0;font-size:11px;flex-shrink:0;">×</button>
+      </span>
+    `;
+  }).join('');
 }
 
 function _removeAttach(i) {
@@ -2506,12 +2524,50 @@ async function openDocFolder() {
   } catch { toast('Impossibile aprire la cartella', 'error'); }
 }
 
+// ── Update check ─────────────────────────────────────────────────────────────
+async function checkForUpdate() {
+  try {
+    const res = await fetch('/api/version');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.has_update) {
+      const banner = document.getElementById('update-banner');
+      const text = document.getElementById('update-banner-text');
+      const link = document.getElementById('update-banner-link');
+      if (!banner || !text) return;
+      text.textContent = `noted ${data.release_name} disponibile (versione attuale: ${data.current}) — aggiorna con: pip install -e . --upgrade`;
+      if (link && data.release_url) link.href = data.release_url;
+      banner.style.display = 'flex';
+    }
+  } catch { /* silenzioso */ }
+}
+
+// ── Paste screenshot ──────────────────────────────────────────────────────────
+document.getElementById('note-input')?.addEventListener('paste', function(e) {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault();
+      const blob = item.getAsFile();
+      if (!blob) continue;
+      const ext = item.type.split('/')[1] || 'png';
+      const file = new File([blob], `screenshot_${Date.now()}.${ext}`, { type: item.type });
+      _pendingFiles.push(file);
+      _renderAttachPreview();
+      toast('📸 Screenshot allegato — verrà salvato con la nota', 'success');
+      break;
+    }
+  }
+});
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadNotes();
 resetRefresh();
 _loadLocalIp();
 loadDocRoot();
 loadOllamaSettings();
+checkForUpdate();
 
 // ── Voice input ───────────────────────────────────────────────────────────────
 let _mediaRecorder = null;
@@ -2976,5 +3032,111 @@ async function saveOllamaSettings() {
     checkOllamaStatus();
   } catch {
     toast('Errore salvataggio impostazioni', 'error');
+  }
+}
+
+// ── Markdown Editor ───────────────────────────────────────────────────────────
+let _editorInited = false;
+
+function initEditor() {
+  if (_editorInited) return;
+  _editorInited = true;
+  const ta = document.getElementById('editor-textarea');
+  // Restore draft
+  const saved = localStorage.getItem('noted-editor-draft');
+  if (saved) ta.value = saved;
+  ta.addEventListener('input', () => {
+    localStorage.setItem('noted-editor-draft', ta.value);
+    _editorPreview();
+  });
+  _editorPreview();
+}
+
+function _editorPreview() {
+  const ta = document.getElementById('editor-textarea');
+  const preview = document.getElementById('editor-preview');
+  if (!ta || !preview) return;
+  preview.innerHTML = typeof marked !== 'undefined'
+    ? marked.parse(ta.value || '')
+    : '<em>marked.js non caricato</em>';
+}
+
+function editorCmd(cmd) {
+  const ta = document.getElementById('editor-textarea');
+  const start = ta.selectionStart;
+  const end = ta.selectionEnd;
+  const sel = ta.value.substring(start, end);
+  let insert = '';
+  let offset = 0;
+
+  switch (cmd) {
+    case 'bold':   insert = `**${sel || 'testo'}**`; offset = sel ? 0 : 2; break;
+    case 'italic': insert = `*${sel || 'testo'}*`;   offset = sel ? 0 : 1; break;
+    case 'h1':     insert = `\n# ${sel || 'Titolo'}\n`; offset = 3; break;
+    case 'h2':     insert = `\n## ${sel || 'Titolo'}\n`; offset = 4; break;
+    case 'h3':     insert = `\n### ${sel || 'Titolo'}\n`; offset = 5; break;
+    case 'ul':     insert = `\n- ${sel || 'elemento'}\n`; offset = 3; break;
+    case 'ol':     insert = `\n1. ${sel || 'elemento'}\n`; offset = 4; break;
+    case 'code':
+      if (sel.includes('\n')) {
+        insert = `\`\`\`\n${sel || 'codice'}\n\`\`\``;
+        offset = 4;
+      } else {
+        insert = `\`${sel || 'codice'}\``;
+        offset = sel ? 0 : 1;
+      }
+      break;
+    case 'table':
+      insert = '\n| Colonna 1 | Colonna 2 | Colonna 3 |\n|-----------|-----------|------------|\n| cella     | cella     | cella      |\n';
+      offset = 2;
+      break;
+  }
+
+  ta.setRangeText(insert, start, end, 'end');
+  if (!sel) ta.setSelectionRange(start + offset, start + offset + (sel || cmd === 'table' ? 0 : insert.length - offset * 2));
+  ta.focus();
+  localStorage.setItem('noted-editor-draft', ta.value);
+  _editorPreview();
+}
+
+function editorClear() {
+  if (document.getElementById('editor-textarea').value && !confirm('Cancellare il documento corrente?')) return;
+  document.getElementById('editor-textarea').value = '';
+  document.getElementById('editor-filename').value = '';
+  document.getElementById('editor-preview').innerHTML = '';
+  localStorage.removeItem('noted-editor-draft');
+}
+
+async function editorExport(format) {
+  const content = document.getElementById('editor-textarea').value.trim();
+  if (!content) { toast('Editor vuoto', 'info'); return; }
+  const filename = document.getElementById('editor-filename').value.trim();
+  const btn = document.querySelector(`.editor-tb-export[onclick*="${format}"]`);
+  const origText = btn?.textContent;
+  if (btn) btn.textContent = '⏳ Esporto…';
+  try {
+    const res = await fetch(`/api/editor/export/${format}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content, filename }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Errore export');
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get('content-disposition') || '';
+    const nameMatch = disposition.match(/filename="?([^"]+)"?/);
+    const dlName = nameMatch ? nameMatch[1] : `export.${format}`;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = dlName;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast(`${format.toUpperCase()} salvato in doc_root e scaricato`, 'success');
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    if (btn) btn.textContent = origText;
   }
 }
