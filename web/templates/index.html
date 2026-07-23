@@ -323,7 +323,9 @@
         <input type="text" id="editor-filename" placeholder="Nome file (opzionale)" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:0.75rem;padding:4px 10px;outline:none;width:180px;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
         <span class="editor-tb-sep"></span>
         <button class="editor-tb-btn editor-tb-export" onclick="editorExport('docx')" title="Esporta DOCX">📎 DOCX</button>
-        <button class="editor-tb-btn editor-tb-export" onclick="editorExport('pdf')" title="Esporta PDF">📄 PDF</button>
+        <button class="editor-tb-btn editor-tb-export" onclick="editorExport('pdf')" title="Stampa / Salva PDF">📄 PDF</button>
+        <button class="editor-tb-btn editor-tb-export" onclick="editorExport('md')" title="Esporta Markdown">⬇ MD</button>
+        <button class="editor-tb-btn editor-tb-export" onclick="editorExport('txt')" title="Esporta testo plain">⬇ TXT</button>
         <button class="editor-tb-btn" onclick="editorClear()" title="Nuovo documento" style="margin-left:auto;color:var(--text-dim);">✕ nuovo</button>
       </div>
       <!-- Split pane -->

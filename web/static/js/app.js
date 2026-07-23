@@ -3111,9 +3111,10 @@ async function editorExport(format) {
   const content = document.getElementById('editor-textarea').value.trim();
   if (!content) { toast('Editor vuoto', 'info'); return; }
   const filename = document.getElementById('editor-filename').value.trim();
-  const btn = document.querySelector(`.editor-tb-export[onclick*="${format}"]`);
+  const btn = document.querySelector(`.editor-tb-export[onclick*="'${format}'"]`);
   const origText = btn?.textContent;
-  if (btn) btn.textContent = '⏳ Esporto…';
+  if (btn) btn.textContent = '⏳…';
+
   try {
     const res = await fetch(`/api/editor/export/${format}`, {
       method: 'POST',
@@ -3124,6 +3125,15 @@ async function editorExport(format) {
       const err = await res.json();
       throw new Error(err.detail || 'Errore export');
     }
+
+    if (format === 'pdf') {
+      const html = await res.text();
+      const win = window.open('', '_blank');
+      win.document.write(html);
+      win.document.close();
+      return;
+    }
+
     const blob = await res.blob();
     const disposition = res.headers.get('content-disposition') || '';
     const nameMatch = disposition.match(/filename="?([^"]+)"?/);
@@ -3133,7 +3143,7 @@ async function editorExport(format) {
     a.download = dlName;
     a.click();
     URL.revokeObjectURL(a.href);
-    toast(`${format.toUpperCase()} salvato in doc_root e scaricato`, 'success');
+    toast(`${format.toUpperCase()} scaricato`, 'success');
   } catch (e) {
     toast(e.message, 'error');
   } finally {

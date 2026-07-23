@@ -158,16 +158,16 @@ def _add_inline(paragraph, text: str) -> None:
         paragraph.add_run(text[last:])
 
 
-# ── PDF ───────────────────────────────────────────────────────────────────────
+# ── PDF / HTML print ──────────────────────────────────────────────────────────
 
-_PDF_CSS = """
+_PRINT_CSS = """
 body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 11pt; line-height: 1.6; color: #1a1a2e; margin: 2cm; }
 h1 { font-size: 22pt; border-bottom: 2px solid #6366f1; padding-bottom: 4px; color: #312e81; }
 h2 { font-size: 16pt; color: #4338ca; margin-top: 18px; }
 h3 { font-size: 13pt; color: #4f46e5; margin-top: 14px; }
 p { margin: 6px 0 10px; }
 code { font-family: 'Courier New', monospace; font-size: 9pt; background: #f1f3f8; padding: 1px 4px; border-radius: 3px; color: #6b7280; }
-pre { background: #f1f3f8; padding: 10px 14px; border-radius: 6px; font-size: 9pt; font-family: 'Courier New', monospace; color: #374151; overflow-x: auto; }
+pre { background: #f1f3f8; padding: 10px 14px; border-radius: 6px; font-size: 9pt; font-family: 'Courier New', monospace; color: #374151; }
 ul, ol { margin: 6px 0 10px 20px; }
 li { margin-bottom: 3px; }
 table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 10pt; }
@@ -177,21 +177,18 @@ tr:nth-child(even) td { background: #f8f9fc; }
 blockquote { border-left: 3px solid #6366f1; margin: 8px 0; padding: 4px 12px; color: #6b7280; font-style: italic; }
 hr { border: none; border-top: 1px solid #dde1ee; margin: 16px 0; }
 strong { color: #1a1a2e; }
+@media print { body { margin: 1cm; } }
 """
 
-def _md_to_pdf(content: str, out_path: Path) -> None:
-    try:
-        import markdown as md_lib
-        import weasyprint
-        html_body = md_lib.markdown(content, extensions=['tables', 'fenced_code', 'nl2br'])
-        full_html = f"<!DOCTYPE html><html><head><meta charset='utf-8'><style>{_PDF_CSS}</style></head><body>{html_body}</body></html>"
-        weasyprint.HTML(string=full_html).write_pdf(str(out_path))
-    except ImportError:
-        # Fallback: save as printable HTML
-        import markdown as md_lib
-        html_body = md_lib.markdown(content, extensions=['tables', 'fenced_code', 'nl2br'])
-        full_html = f"<!DOCTYPE html><html><head><meta charset='utf-8'><style>{_PDF_CSS} @media print {{ body {{ margin:1cm }} }}</style></head><body>{html_body}</body></html>"
-        out_path.write_text(full_html, encoding='utf-8')
+def _md_to_print_html(content: str) -> str:
+    import markdown as md_lib
+    html_body = md_lib.markdown(content, extensions=['tables', 'fenced_code', 'nl2br'])
+    return (
+        f"<!DOCTYPE html><html><head><meta charset='utf-8'>"
+        f"<style>{_PRINT_CSS}</style></head><body>{html_body}"
+        f"<script>window.onload=function(){{window.print();}}</script>"
+        f"</body></html>"
+    )
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -214,18 +211,39 @@ async def api_export_pdf(body: ExportRequest):
         import markdown as md_lib  # noqa
     except ImportError:
         raise HTTPException(status_code=501, detail="Installa: pip install markdown")
-
-    name = _safe_name(body.filename, "pdf")
-    out = _doc_root() / name
-
     try:
-        _md_to_pdf(body.content, out)
+        from fastapi.responses import HTMLResponse
+        html = _md_to_print_html(body.content)
+        return HTMLResponse(content=html)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    # If weasyprint not available, out_path is actually HTML
-    if out.suffix == '.pdf' and not out.exists():
-        raise HTTPException(status_code=500, detail="weasyprint non disponibile. Installa: pip install weasyprint")
 
-    media = "application/pdf" if out.suffix == ".pdf" else "text/html"
-    return FileResponse(str(out), filename=name, media_type=media)
+@router.post("/api/editor/export/md")
+async def api_export_md(body: ExportRequest):
+    from fastapi.responses import Response
+    name = _safe_name(body.filename, "md")
+    return Response(
+        content=body.content.encode("utf-8"),
+        media_type="text/markdown",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
+@router.post("/api/editor/export/txt")
+async def api_export_txt(body: ExportRequest):
+    from fastapi.responses import Response
+    import re as _re
+    # strip markdown syntax for plain text
+    text = body.content
+    text = _re.sub(r'#{1,6}\s*', '', text)
+    text = _re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+    text = _re.sub(r'\*(.+?)\*', r'\1', text)
+    text = _re.sub(r'`(.+?)`', r'\1', text)
+    text = _re.sub(r'^\s*[-*+] ', '• ', text, flags=_re.MULTILINE)
+    name = _safe_name(body.filename, "txt")
+    return Response(
+        content=text.encode("utf-8"),
+        media_type="text/plain",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
