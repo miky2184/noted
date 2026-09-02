@@ -1,3 +1,62 @@
+// ── API token (shared secret required by every /api/* call) ───────────────────
+// See web/auth.py. The token pairs this browser with the noted server; it's
+// requested once (via an in-page modal — NOT window.prompt(), which mobile
+// browsers/installed PWAs frequently block) and cached in localStorage. On
+// another device (e.g. a phone on the same LAN) the first API call triggers
+// the same modal — copy the token from Impostazioni → 🔑 Accesso on a device
+// already paired, or from `noted token` in the server machine's terminal.
+const NOTED_TOKEN_KEY = 'noted-api-token';
+let _notedTokenModalOpen = false;
+let _notedTokenResolvers = [];
+
+function notedShowTokenModal() {
+  return new Promise((resolve) => {
+    _notedTokenResolvers.push(resolve);
+    if (_notedTokenModalOpen) return;
+    _notedTokenModalOpen = true;
+    const modal = document.getElementById('token-modal');
+    const input = document.getElementById('token-modal-input');
+    if (input) input.value = '';
+    if (modal) modal.classList.add('show');
+    setTimeout(() => input && input.focus(), 50);
+  });
+}
+
+function notedSubmitToken() {
+  const input = document.getElementById('token-modal-input');
+  const val = (input && input.value || '').trim();
+  if (!val) return;
+  localStorage.setItem(NOTED_TOKEN_KEY, val);
+  const modal = document.getElementById('token-modal');
+  if (modal) modal.classList.remove('show');
+  _notedTokenModalOpen = false;
+  const resolvers = _notedTokenResolvers.splice(0);
+  resolvers.forEach((r) => r(val));
+}
+
+async function notedGetToken() {
+  const stored = localStorage.getItem(NOTED_TOKEN_KEY);
+  if (stored) return stored;
+  return notedShowTokenModal();
+}
+
+const _notedNativeFetch = window.fetch.bind(window);
+window.fetch = async function notedFetch(input, init) {
+  const url = typeof input === 'string' ? input : (input && input.url) || '';
+  if (url.startsWith('/api/')) {
+    init = init ? { ...init } : {};
+    const headers = new Headers(init.headers || {});
+    headers.set('X-Noted-Token', await notedGetToken());
+    init.headers = headers;
+  }
+  const res = await _notedNativeFetch(input, init);
+  if (res.status === 401 && url.startsWith('/api/')) {
+    // token mancante/non valido: dimentica e ri-chiedi al prossimo tentativo
+    localStorage.removeItem(NOTED_TOKEN_KEY);
+  }
+  return res;
+};
+
 // ── State ─────────────────────────────────────────────────────────────────────
 let llmActive = false;
 let currentDate = window.NOTED_BOOT.today;
@@ -323,7 +382,7 @@ function switchTab(tab) {
   activeTab = tab;
   const isMobile = window.innerWidth <= 768;
 
-  ['notes', 'board', 'gantt', 'docs', 'editor'].forEach(t => {
+  ['notes', 'activity', 'board', 'gantt', 'docs', 'editor'].forEach(t => {
     const tabBtn = document.getElementById(`tab-${t}`);
     if (tabBtn) tabBtn.classList.toggle('active', t === tab);
     const mb = document.getElementById(`mnav-${t}`);
@@ -331,6 +390,7 @@ function switchTab(tab) {
   });
 
   document.getElementById('view-notes').style.display = tab === 'notes' ? 'block' : 'none';
+  document.getElementById('view-activity').style.display = tab === 'activity' ? 'block' : 'none';
   document.getElementById('view-board').style.display = tab === 'board' ? 'block' : 'none';
   document.getElementById('view-gantt').style.display = tab === 'gantt' ? 'block' : 'none';
   document.getElementById('view-docs').style.display = tab === 'docs' ? 'block' : 'none';
@@ -362,6 +422,7 @@ function switchTab(tab) {
     }
   }
   if (tab === 'board') loadBoard();
+  if (tab === 'activity') loadActivity();
 }
 
 // ── Note bottom sheet (mobile) ────────────────────────────────────────────────
@@ -391,7 +452,7 @@ function toggleNoteSheet() {
 (function() {
   const box = document.getElementById('recap-box');
   if (box && window.NOTED_BOOT.recapSummary) {
-    box.innerHTML = marked.parse(window.NOTED_BOOT.recapSummary);
+    box.innerHTML = renderMarkdown(window.NOTED_BOOT.recapSummary);
   }
 })();
 
@@ -406,6 +467,7 @@ function toast(msg, type = '') {
 
 // ── Due notes ─────────────────────────────────────────────────────────────────
 const STATUS_LABEL = { backlog: '🗂 backlog', todo: '⬜ todo', discuss: '💬 discuss', wip: '🔄 wip', waiting: '⏳ waiting', blocked: '🚫 blocked', done: '✅ done' };
+const STATUS_EMOJI = { backlog: '🗂', todo: '⬜', discuss: '💬', wip: '🔄', waiting: '⏳', blocked: '🚫', done: '✅' };
 
 async function loadDueNotes() {
   try {
@@ -472,6 +534,7 @@ function renderDueNotes(notes) {
 
 async function reloadActiveView() {
   if (activeTab === 'board') return loadBoard();
+  if (activeTab === 'activity') return loadActivity();
   if (activeTab === 'due') return loadDueNotes();
   if (activeTab === 'focus') return loadFocus();
   return loadNotes();
@@ -667,6 +730,167 @@ function _syncHideDoneBtn() {
   btn.textContent = hideDone ? '🙈 done' : '👁 done';
 }
 
+// Template della singola card nota — condiviso tra la tab "Note" (per giorno)
+// e la tab "Attività" (trasversale, per scadenza/inizio/senza data).
+function _noteCardHtml(n, today) {
+  const tagsGroup = `<span class="tags-group" onclick="editTags(this,${n.id},'${escHtml(n.tags.join(','))}')" title="Modifica tag">${
+    n.tags.length
+      ? n.tags.map(t => `<span class="tag">#${escHtml(t)}</span>`).join('')
+      : `<span class="tag tag-empty">+tag</span>`
+  }</span>`;
+  const clienteHtml = n.cliente
+    ? `<span class="project-badge" style="background:var(--accent-dim);color:var(--accent);" onclick="editCliente(this,${n.id},'${escHtml(n.cliente)}')" title="Modifica cliente">🏢 ${escHtml(n.cliente)}</span>`
+    : `<span class="project-badge project-empty" onclick="editCliente(this,${n.id},'')" title="Aggiungi cliente">+cliente</span>`;
+  const projHtml = n.project
+    ? `<span class="project-badge" onclick="editProject(this,${n.id},'${escHtml(n.project)}')" title="Modifica progetto">${escHtml(n.project)}</span>`
+    : `<span class="project-badge project-empty" onclick="editProject(this,${n.id},'')" title="Aggiungi progetto">+progetto</span>`;
+  const msHtml = n.milestone_id
+    ? `<span class="milestone-badge" onclick="editNoteStream(event,${n.id},${n.milestone_id},'${escHtml(n.project||'')}')">🏁 stream#${n.milestone_id}</span>`
+    : (n.project
+       ? `<span class="milestone-badge milestone-empty" onclick="editNoteStream(event,${n.id},null,'${escHtml(n.project||'')}')">+ stream</span>`
+       : '');
+  const assigneeHtml = _renderAssigneeBadges(n.assignee, n.id);
+  return `
+  <div class="note-item" data-id="${n.id}">
+    <div class="note-meta">
+      <span class="note-time">${n.created_at.slice(11, 16)}</span>
+      ${clienteHtml}
+      ${projHtml}
+      ${msHtml}
+      ${tagsGroup}
+      ${assigneeHtml}
+      <span class="status ${n.status ? 'status-'+n.status : 'status-empty'}" onclick="cycleStatus(${n.id},'${n.status||''}')" title="Clicca per cambiare stato">${n.status ? STATUS_LABEL[n.status] : '+ stato'}</span>
+      <span class="priority priority-${n.priority}" onclick="cyclePriority(${n.id},'${n.priority}')" title="Clicca per cambiare priorità">${n.priority}</span>
+      <span class="due-date${n.start_date ? '' : ' due-empty'}" onclick="editStart(this,${n.id},'${n.start_date||''}')" title="Clicca per impostare data inizio">${n.start_date ? '🚀 '+n.start_date : '+ inizio'}</span>
+      <span class="due-date${n.due_date ? (n.due_date < today ? ' overdue' : (n.due_date <= new Date(Date.now()+2*86400000).toISOString().slice(0,10) ? ' soon' : '')) : ' due-empty'}" onclick="editDue(this,${n.id},'${n.due_date||''}')" title="Clicca per impostare scadenza">${n.due_date ? '📅 '+n.due_date : '+ scadenza'}</span>
+      <span class="note-id">#${n.id}</span>
+      <button class="hide-btn email-draft-btn" data-note-id="${n.id}" data-email-subject="${escHtml(n.email_subject||'')}" data-email-body="${escHtml(n.email_body||'')}" onclick="generateEmailDraft(this)" title="${n.email_subject||n.email_body ? 'Vedi bozza email salvata' : 'Genera bozza email con AI'}">${n.email_subject||n.email_body ? '📩' : '✉️'}</button>
+      <button class="hide-btn" onclick="hideNote(${n.id})" title="Nascondi nota">🙈</button>
+      <button class="delete-btn" onclick="deleteNote(${n.id})" title="Elimina">✕</button>
+    </div>
+    <div class="note-content" onclick="startEdit(this,${n.id})" title="Clicca per modificare">${escHtml(n.content)}</div>
+    <div class="note-deps-row" id="deps-chips-${n.id}" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:${(n.blockers.length||n.blocking.length)?'5px':'0'};min-height:0;">
+      ${n.blockers.length ? `<span class="dep-chip blocker" onclick="toggleDepsPanel(${n.id})" title="Bloccata da ${n.blockers.length} nota/e">🚫 ${n.blockers.length} blocker${n.blockers.length>1?'s':''}</span>` : ''}
+      ${n.blocking.length ? `<span class="dep-chip blocking" onclick="toggleDepsPanel(${n.id})" title="Blocca ${n.blocking.length} nota/e">▶ blocca ${n.blocking.length}</span>` : ''}
+      <span class="dep-chip add-dep" onclick="toggleDepsPanel(${n.id})" title="Gestisci dipendenze">+ dipendenza</span>
+    </div>
+    <div class="deps-panel" id="deps-panel-${n.id}"></div>
+    ${n.docs && n.docs.length ? `
+      <div class="note-docs">
+        ${n.docs.map(d => `
+          <button class="doc-chip" onclick="openDoc(${d.id})" title="${escHtml(d.orig_name)}${d.analysis ? '\n\n' + escHtml(d.analysis) : ''}">
+            ${_fileIcon(d.mime_type, d.orig_name)}
+            <span>${escHtml(d.orig_name)}</span>
+            ${d.analysis ? '<span class="doc-chip-ai" title="Analisi AI disponibile">🔍</span>' : ''}
+            <span class="doc-chip-size">${_fmtSize(d.size_bytes)}</span>
+          </button>
+        `).join('')}
+        <button class="doc-chip doc-chip-add" onclick="attachToNote(${n.id})" title="Allega file">📎</button>
+      </div>
+    ` : `<button class="doc-chip doc-chip-add doc-chip-add-hidden" onclick="attachToNote(${n.id})" title="Allega file">📎</button>`}
+  </div>`;
+}
+
+// ── Bozza email via AI (Anthropic) a partire dal contenuto di una nota ────────
+// Generata una volta, resta salvata sulla nota: un secondo clic mostra quella
+// esistente senza richiamare l'AI. La si può far riscrivere indicando una
+// modifica nel box dedicato dentro il modal.
+function generateEmailDraft(btn) {
+  const noteId = btn.dataset.noteId;
+  const savedSubject = btn.dataset.emailSubject || '';
+  const savedBody = btn.dataset.emailBody || '';
+  if (savedSubject || savedBody) {
+    _showEmailDraftModal(noteId, savedSubject, savedBody);
+    return;
+  }
+  _requestEmailDraft(noteId, btn, null);
+}
+
+async function _requestEmailDraft(noteId, triggerBtn, instruction) {
+  const original = triggerBtn.textContent;
+  triggerBtn.textContent = '⏳';
+  triggerBtn.disabled = true;
+  try {
+    const res = await apiFetch(`/api/notes/${noteId}/email-draft`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({instruction: instruction || null}),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Errore generazione email');
+    }
+    const draft = await res.json();
+    _updateEmailDraftButtonCache(noteId, draft.subject, draft.body);
+    _showEmailDraftModal(noteId, draft.subject, draft.body);
+  } catch (e) {
+    toast(e.message || 'Errore generazione email', 'error');
+  } finally {
+    triggerBtn.textContent = original;
+    triggerBtn.disabled = false;
+  }
+}
+
+function _updateEmailDraftButtonCache(noteId, subject, body) {
+  const btn = document.querySelector(`.email-draft-btn[data-note-id="${noteId}"]`);
+  if (!btn) return;
+  btn.dataset.emailSubject = subject;
+  btn.dataset.emailBody = body;
+  btn.textContent = '📩';
+  btn.title = 'Vedi bozza email salvata';
+}
+
+async function _refineEmailDraft(noteId) {
+  const instrEl = document.getElementById('email-draft-instruction');
+  const instruction = instrEl.value.trim();
+  if (!instruction) { toast('Scrivi una richiesta di modifica', 'error'); return; }
+  const btn = document.getElementById('email-draft-refine-btn');
+  await _requestEmailDraft(noteId, btn, instruction);
+}
+
+function _showEmailDraftModal(noteId, subject, body) {
+  document.getElementById('email-draft-modal')?.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'email-draft-modal';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;z-index:2000;';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;max-width:520px;width:90%;max-height:85vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,0.4);">
+      <div style="display:flex;align-items:center;margin-bottom:14px;">
+        <span style="font-size:0.95rem;font-weight:700;color:var(--text);">✉️ Bozza email</span>
+        <button onclick="document.getElementById('email-draft-modal').remove()" style="margin-left:auto;background:none;border:none;color:var(--text-muted);font-size:1.1rem;cursor:pointer;">✕</button>
+      </div>
+      <label style="font-size:0.7rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em;">Oggetto</label>
+      <input id="email-draft-subject" class="gantt-input" value="${escHtml(subject)}" style="width:100%;margin:4px 0 12px;box-sizing:border-box;">
+      <label style="font-size:0.7rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em;">Corpo</label>
+      <textarea id="email-draft-body" class="gantt-input" style="width:100%;min-height:200px;margin-top:4px;font-family:inherit;resize:vertical;box-sizing:border-box;">${escHtml(body)}</textarea>
+      <label style="font-size:0.7rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em;margin-top:12px;display:block;">Richiedi una modifica</label>
+      <textarea id="email-draft-instruction" class="gantt-input" placeholder="Es: rendila più breve, aggiungi il dettaglio X, tono più informale..." style="width:100%;min-height:50px;margin-top:4px;font-family:inherit;resize:vertical;box-sizing:border-box;"></textarea>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button id="email-draft-refine-btn" class="gantt-btn-sm" onclick="_refineEmailDraft(${noteId})">🔄 Rigenera con questa modifica</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:14px;">
+        <button class="gantt-btn" onclick="_copyEmailDraft()">📋 Copia</button>
+        <button class="gantt-btn" onclick="_openEmailDraftInMailClient()">✉️ Apri in client mail</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+function _copyEmailDraft() {
+  const subject = document.getElementById('email-draft-subject').value;
+  const body = document.getElementById('email-draft-body').value;
+  navigator.clipboard.writeText(`Oggetto: ${subject}\n\n${body}`)
+    .then(() => toast('Copiato negli appunti', 'success'))
+    .catch(() => toast('Errore copia', 'error'));
+}
+
+function _openEmailDraftInMailClient() {
+  const subject = encodeURIComponent(document.getElementById('email-draft-subject').value);
+  const body = encodeURIComponent(document.getElementById('email-draft-body').value);
+  window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
+}
+
 function renderNotes(notes) {
   const list = document.getElementById('notes-list');
   _syncHideDoneBtn();
@@ -689,58 +913,7 @@ function renderNotes(notes) {
   const hiddenDoneCount = hideDone ? doneNotes.length : 0;
 
   const today = window.NOTED_BOOT.today;
-  const noteCards = visible.map(n => {
-    const tagsGroup = `<span class="tags-group" onclick="editTags(this,${n.id},'${escHtml(n.tags.join(','))}')" title="Modifica tag">${
-      n.tags.length
-        ? n.tags.map(t => `<span class="tag">#${escHtml(t)}</span>`).join('')
-        : `<span class="tag tag-empty">+tag</span>`
-    }</span>`;
-    const projHtml = n.project
-      ? `<span class="project-badge" onclick="editProject(this,${n.id},'${escHtml(n.project)}')" title="Modifica progetto">${escHtml(n.project)}</span>`
-      : `<span class="project-badge project-empty" onclick="editProject(this,${n.id},'')" title="Aggiungi progetto">+progetto</span>`;
-    const msHtml = n.milestone_id
-      ? `<span class="milestone-badge" onclick="editMilestone(event,${n.id},${n.milestone_id},'${escHtml(n.project||'')}')">🏁 ms#${n.milestone_id}</span>`
-      : (n.project
-         ? `<span class="milestone-badge milestone-empty" onclick="editMilestone(event,${n.id},null,'${escHtml(n.project||'')}')">+ ms</span>`
-         : '');
-    const assigneeHtml = _renderAssigneeBadges(n.assignee, n.id);
-    return `
-    <div class="note-item" data-id="${n.id}">
-      <div class="note-meta">
-        <span class="note-time">${n.created_at.slice(11, 16)}</span>
-        ${projHtml}
-        ${msHtml}
-        ${tagsGroup}
-        ${assigneeHtml}
-        <span class="status ${n.status ? 'status-'+n.status : 'status-empty'}" onclick="cycleStatus(${n.id},'${n.status||''}')" title="Clicca per cambiare stato">${n.status ? STATUS_LABEL[n.status] : '+ stato'}</span>
-        <span class="priority priority-${n.priority}" onclick="cyclePriority(${n.id},'${n.priority}')" title="Clicca per cambiare priorità">${n.priority}</span>
-        <span class="due-date${n.due_date ? (n.due_date < today ? ' overdue' : (n.due_date <= new Date(Date.now()+2*86400000).toISOString().slice(0,10) ? ' soon' : '')) : ' due-empty'}" onclick="editDue(this,${n.id},'${n.due_date||''}')" title="Clicca per impostare scadenza">${n.due_date ? '📅 '+n.due_date : '+ scadenza'}</span>
-        <span class="note-id">#${n.id}</span>
-        <button class="hide-btn" onclick="hideNote(${n.id})" title="Nascondi nota">🙈</button>
-        <button class="delete-btn" onclick="deleteNote(${n.id})" title="Elimina">✕</button>
-      </div>
-      <div class="note-content" onclick="startEdit(this,${n.id})" title="Clicca per modificare">${escHtml(n.content)}</div>
-      <div class="note-deps-row" id="deps-chips-${n.id}" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:${(n.blockers.length||n.blocking.length)?'5px':'0'};min-height:0;">
-        ${n.blockers.length ? `<span class="dep-chip blocker" onclick="toggleDepsPanel(${n.id})" title="Bloccata da ${n.blockers.length} nota/e">🚫 ${n.blockers.length} blocker${n.blockers.length>1?'s':''}</span>` : ''}
-        ${n.blocking.length ? `<span class="dep-chip blocking" onclick="toggleDepsPanel(${n.id})" title="Blocca ${n.blocking.length} nota/e">▶ blocca ${n.blocking.length}</span>` : ''}
-        <span class="dep-chip add-dep" onclick="toggleDepsPanel(${n.id})" title="Gestisci dipendenze">+ dipendenza</span>
-      </div>
-      <div class="deps-panel" id="deps-panel-${n.id}"></div>
-      ${n.docs && n.docs.length ? `
-        <div class="note-docs">
-          ${n.docs.map(d => `
-            <button class="doc-chip" onclick="openDoc(${d.id})" title="${escHtml(d.orig_name)}${d.analysis ? '\n\n' + escHtml(d.analysis) : ''}">
-              ${_fileIcon(d.mime_type, d.orig_name)}
-              <span>${escHtml(d.orig_name)}</span>
-              ${d.analysis ? '<span class="doc-chip-ai" title="Analisi AI disponibile">🔍</span>' : ''}
-              <span class="doc-chip-size">${_fmtSize(d.size_bytes)}</span>
-            </button>
-          `).join('')}
-          <button class="doc-chip doc-chip-add" onclick="attachToNote(${n.id})" title="Allega file">📎</button>
-        </div>
-      ` : `<button class="doc-chip doc-chip-add doc-chip-add-hidden" onclick="attachToNote(${n.id})" title="Allega file">📎</button>`}
-    </div>`;
-  }).join('');
+  const noteCards = visible.map(n => _noteCardHtml(n, today)).join('');
 
   // Shown-hidden notes (dimmed, with unhide button)
   const shownHiddenCards = shownHidden.map(n => `
@@ -786,6 +959,60 @@ function renderNotes(notes) {
   }
 }
 
+// ── Attività (trasversale a clienti/progetti) ─────────────────────────────────
+let activityShowDone = localStorage.getItem('noted-activity-show-done') === '1';
+
+function toggleActivityShowDone() {
+  activityShowDone = !activityShowDone;
+  localStorage.setItem('noted-activity-show-done', activityShowDone ? '1' : '0');
+  loadActivity();
+}
+
+async function loadActivity() {
+  const btn = document.getElementById('activity-done-btn');
+  if (btn) {
+    btn.style.borderColor = activityShowDone ? 'var(--accent)' : 'var(--border)';
+    btn.style.color = activityShowDone ? 'var(--accent)' : 'var(--text-muted)';
+    btn.style.background = activityShowDone ? 'var(--accent-dim)' : '';
+    btn.textContent = activityShowDone ? '🙈 done' : '👁 done';
+  }
+  try {
+    const res = await apiFetch('/api/notes/today-activity?include_done=' + activityShowDone);
+    renderActivity(await res.json());
+  } catch (e) { console.error(e); }
+}
+
+function renderActivity(data) {
+  const list = document.getElementById('activity-list');
+  const today = window.NOTED_BOOT.today;
+  const hidden = _loadHidden();
+
+  const sections = [
+    { key: 'overdue', title: '⚠️ In ritardo', emptyOk: true },
+    { key: 'due_soon', title: '📅 In scadenza', emptyOk: true },
+    { key: 'starting_today', title: '🚀 Iniziano oggi', emptyOk: true },
+    { key: 'no_date', title: '· Senza data', emptyOk: true },
+  ];
+
+  const totalVisible = sections.reduce((sum, s) => sum + (data[s.key] || []).filter(n => !hidden.has(n.id)).length, 0);
+  if (!totalVisible) {
+    list.innerHTML = `<div class="empty">Niente in ritardo, in scadenza, in partenza oggi o senza data. 🎉</div>`;
+    return;
+  }
+
+  list.innerHTML = sections.map(s => {
+    const notes = (data[s.key] || []).filter(n => !hidden.has(n.id));
+    if (!notes.length) return '';
+    return `
+      <div class="section-header" style="margin-top:14px;">
+        <span class="section-title" style="font-size:0.78rem;">${s.title}</span>
+        <span class="count-badge">${notes.length}</span>
+      </div>
+      ${notes.map(n => _noteCardHtml(n, today)).join('')}
+    `;
+  }).join('');
+}
+
 function renderFilterBar() {
   const bar = document.getElementById('filter-bar');
   if (!activeTag && !activeProject) { bar.style.display = 'none'; return; }
@@ -793,56 +1020,6 @@ function renderFilterBar() {
   bar.innerHTML = '';
   if (activeTag) bar.innerHTML += `<span class="filter-chip">#${escHtml(activeTag)} <button onclick="clearFilter('tag')">✕</button></span>`;
   if (activeProject) bar.innerHTML += `<span class="filter-chip">${escHtml(activeProject)} <button onclick="clearFilter('project')">✕</button></span>`;
-}
-
-const NOTE_TEMPLATES = {
-  meeting: {
-    content: "Meeting: \n\nPartecipanti: \n\nPunti discussi:\n- \n\nDecisioni:\n- \n\nAzioni:\n- ",
-    tags: "meeting",
-    status: "todo",
-  },
-  decision: {
-    content: "Decisione: \n\nContesto:\n\nOpzioni considerate:\n- \n\nDecisione presa:\n\nMotivo:",
-    tags: "decisione",
-    status: "",
-  },
-  followup: {
-    content: "Follow-up: \n\nDa fare:\n- \n\nProssimo passo:",
-    tags: "followup",
-    status: "todo",
-    priority: "medium",
-  },
-  idea: {
-    content: "Idea: \n\nPerché è utile:\n\nPrimo esperimento:",
-    tags: "idea",
-    status: "backlog",
-    priority: "low",
-  },
-};
-
-async function applyNoteTemplate(templateId) {
-  const template = NOTE_TEMPLATES[templateId];
-  if (!template) return;
-  const input = document.getElementById('note-input');
-  if (input.value.trim()) {
-    const ok = await showConfirm(
-      'Applica template',
-      'Il testo corrente verrà sostituito dal template selezionato.<br>Gli altri campi del form verranno aggiornati dove previsto.',
-      'Sostituisci'
-    );
-    if (!ok) {
-      document.getElementById('note-template').value = '';
-      return;
-    }
-  }
-  input.value = template.content;
-  document.getElementById('note-tag').value = template.tags || '';
-  document.getElementById('note-status').value = template.status || '';
-  document.getElementById('note-priority').value = template.priority || 'medium';
-  input.style.height = 'auto';
-  input.style.height = input.scrollHeight + 'px';
-  input.focus();
-  document.getElementById('note-template').value = '';
 }
 
 function filterBy(type, value) {
@@ -920,11 +1097,14 @@ document.getElementById('add-form').addEventListener('submit', async e => {
       body: JSON.stringify({
         content,
         tags: normalizeTags(document.getElementById('note-tag').value),
+        cliente: document.getElementById('note-cliente').value.trim() ? normalizeProject(document.getElementById('note-cliente').value) : null,
         project: document.getElementById('note-project').value.trim() ? normalizeProject(document.getElementById('note-project').value) : null,
         assignee: _mergeAssignees(document.getElementById('note-assignee').value, _extractMentions(content)) || null,
         priority: document.getElementById('note-priority').value,
+        start_date: document.getElementById('note-start').value || null,
         due_date: document.getElementById('note-due').value || null,
         status: document.getElementById('note-status').value || null,
+        milestone_id: _resolveStreamId(document.getElementById('note-stream').value),
       })
     });
     if (!res.ok) throw new Error();
@@ -932,8 +1112,11 @@ document.getElementById('add-form').addEventListener('submit', async e => {
     textarea.value = '';
     textarea.style.height = 'auto';
     document.getElementById('note-tag').value = '';
+    document.getElementById('note-cliente').value = '';
     document.getElementById('note-project').value = '';
+    document.getElementById('note-stream').value = '';
     document.getElementById('note-assignee').value = '';
+    document.getElementById('note-start').value = '';
     document.getElementById('note-due').value = '';
     document.getElementById('note-priority').value = 'medium';
     document.getElementById('note-status').value = '';
@@ -953,7 +1136,7 @@ async function deleteNote(id) {
   const card = document.querySelector(`[data-id="${id}"]`);
   if (card) card.style.opacity = '0.4';
   try {
-    const res = await fetch(`/api/notes/${id}`, { method: 'DELETE' });
+    const res = await apiFetch(`/api/notes/${id}`, { method: 'DELETE' });
     if (!res.ok) throw new Error();
     await reloadActiveView();
     toast('Nota eliminata');
@@ -1049,7 +1232,7 @@ function editDue(el, noteId, currentDue) {
     } catch { toast('Errore aggiornamento scadenza', 'error'); }
     await loadNotes();
   }
-  const reload = () => activeTab === 'due' ? loadDueNotes() : loadNotes();
+  const reload = () => activeTab === 'activity' ? loadActivity() : loadNotes();
   input.onblur = save;
   input.onkeydown = e => {
     if (e.key === 'Enter') input.blur();
@@ -1061,7 +1244,7 @@ async function patchNote(noteId, data) {
   const card = document.querySelector(`.note-item[data-id="${noteId}"]`);
   if (card) card.classList.add('saving');
   try {
-    const res = await fetch(`/api/notes/${noteId}`, {
+    const res = await apiFetch(`/api/notes/${noteId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -1080,7 +1263,7 @@ async function loadRecap(id) {
     if (!res.ok) throw new Error();
     const r = await res.json();
     document.getElementById('recap-content').innerHTML =
-      `<div class="recap-box" id="recap-box">${marked.parse(r.summary)}</div>`;
+      `<div class="recap-box" id="recap-box">${renderMarkdown(r.summary)}</div>`;
     // highlight active item
     document.querySelectorAll('.recap-day').forEach(el => el.classList.remove('recap-day-active'));
     const row = document.getElementById(`recap-row-${id}`);
@@ -1114,6 +1297,14 @@ function resetRefresh() {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Markdown → sanitized HTML. Recap/note content can embed anything the user
+// (or the AI, echoing note text back) typed, so never innerHTML the raw
+// output of marked.parse() — always go through this.
+function renderMarkdown(raw) {
+  const html = marked.parse(raw || '');
+  return typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(html) : escHtml(raw || '');
 }
 
 function normalizeProject(raw) {
@@ -1153,7 +1344,7 @@ async function _streamToRecapBox(url, doneLabel) {
       const { done, value } = await reader.read();
       if (done) break;
       full += decoder.decode(value, { stream: true });
-      recapBox.innerHTML = marked.parse(full);
+      recapBox.innerHTML = renderMarkdown(full);
       recapBox.scrollIntoView({ block: 'nearest' });
     }
     toast(doneLabel, 'success');
@@ -1346,22 +1537,26 @@ async function loadBoard() {
   const dot = document.getElementById('board-refresh-dot');
   if (dot) { dot.classList.add('active'); setTimeout(() => dot.classList.remove('active'), 600); }
   const q = document.getElementById('board-q-filter').value.trim();
+  const cliente = document.getElementById('board-cliente-filter').value.trim();
   const tag = document.getElementById('board-tag-filter').value.trim().replace(/^#/, '');
   const project = document.getElementById('board-project-filter').value.trim();
   const assignee = document.getElementById('board-assignee-filter').value.trim();
   const priority = document.getElementById('board-priority-filter').value;
   const due = document.getElementById('board-due-filter').value;
   const createdToday = document.getElementById('board-created-today-filter').checked;
+  const noCliente = document.getElementById('board-no-cliente-filter').checked;
   const noProject = document.getElementById('board-no-project-filter').checked;
   const noTag = document.getElementById('board-no-tag-filter').checked;
   const params = new URLSearchParams();
   if (q) params.set('q', q);
+  if (cliente) params.set('cliente', cliente);
   if (tag) params.set('tag', tag);
   if (project) params.set('project', project);
   if (assignee) params.set('assignee', assignee);
   if (priority) params.set('priority', priority);
   if (due) params.set('due', due);
   if (createdToday) params.set('created', 'today');
+  if (noCliente) params.set('no_cliente', 'true');
   if (noProject) params.set('no_project', 'true');
   if (noTag) params.set('no_tag', 'true');
   try {
@@ -1373,12 +1568,14 @@ async function loadBoard() {
 
 function clearBoardFilters() {
   document.getElementById('board-q-filter').value = '';
+  document.getElementById('board-cliente-filter').value = '';
   document.getElementById('board-tag-filter').value = '';
   document.getElementById('board-project-filter').value = '';
   document.getElementById('board-assignee-filter').value = '';
   document.getElementById('board-priority-filter').value = '';
   document.getElementById('board-due-filter').value = '';
   document.getElementById('board-created-today-filter').checked = false;
+  document.getElementById('board-no-cliente-filter').checked = false;
   document.getElementById('board-no-project-filter').checked = false;
   document.getElementById('board-no-tag-filter').checked = false;
   loadBoard();
@@ -1470,7 +1667,7 @@ function boardCard(n, today, dimmed = false) {
   const projHtml = n.project ? `<span class="project-badge">${escHtml(n.project)}</span>` : '';
   const dueHtml = n.due_date ? `<span class="due-date ${n.due_date < today ? 'overdue' : (n.due_date === today ? 'soon' : '')}" style="font-size:0.65rem">📅 ${n.due_date}</span>` : '';
   const hideHtml = dimmed
-    ? `<button class="hide-btn" style="opacity:1;color:var(--accent);margin-left:auto;" onclick="event.stopPropagation();unhideNote(${n.id})" title="Mostra nota">👁</button>`
+    ? `<button class="hide-btn" style="opacity:1;color:var(--accent);" onclick="event.stopPropagation();unhideNote(${n.id})" title="Mostra nota">👁</button>`
     : `<button class="hide-btn" onclick="event.stopPropagation();hideNote(${n.id})" title="Nascondi nota">🙈</button>
        <button class="delete-btn" onclick="event.stopPropagation();deleteNote(${n.id})" title="Elimina">✕</button>`;
   return `
@@ -1480,7 +1677,7 @@ function boardCard(n, today, dimmed = false) {
       ${projHtml}${assigneeHtml}
       <span class="status status-${n.status}" onclick="event.stopPropagation();cycleStatus(${n.id},'${n.status||''}')" title="Avanza stato" style="cursor:pointer">${STATUS_LABEL[n.status]||''}</span>
       ${dueHtml}
-      <span style="margin-left:auto;display:flex;gap:4px;align-items:center;">${hideHtml}</span>
+      <span class="board-card-actions">${hideHtml}</span>
     </div>
   </div>`;
 }
@@ -1495,7 +1692,7 @@ function editTags(container, noteId, currentTags) {
   container.replaceWith(input);
   input.focus();
   input.select();
-  const reload = () => activeTab === 'due' ? loadDueNotes() : loadNotes();
+  const reload = () => activeTab === 'activity' ? loadActivity() : loadNotes();
   async function save() {
     const val = normalizeTags(input.value);
     try {
@@ -1519,7 +1716,7 @@ function editProject(el, noteId, currentProject) {
   el.replaceWith(input);
   input.focus();
   input.select();
-  const reload = () => activeTab === 'due' ? loadDueNotes() : loadNotes();
+  const reload = () => activeTab === 'activity' ? loadActivity() : loadNotes();
   async function save() {
     const raw = input.value.trim();
     const val = raw ? normalizeProject(raw) : '';
@@ -1529,6 +1726,56 @@ function editProject(el, noteId, currentProject) {
     } catch { toast('Errore aggiornamento progetto', 'error'); }
     reload();
   }
+  input.onblur = save;
+  input.onkeydown = e => {
+    if (e.key === 'Enter') input.blur();
+    if (e.key === 'Escape') reload();
+  };
+}
+
+function editCliente(el, noteId, currentCliente) {
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = currentCliente;
+  input.placeholder = 'cliente';
+  input.style.cssText = 'background:var(--surface2);border:1px solid var(--accent);border-radius:6px;color:var(--text);font-size:0.72rem;padding:2px 8px;outline:none;width:120px;';
+  el.replaceWith(input);
+  input.focus();
+  input.select();
+  const reload = () => activeTab === 'activity' ? loadActivity() : loadNotes();
+  async function save() {
+    const raw = input.value.trim();
+    const val = raw ? normalizeProject(raw) : '';
+    try {
+      await patchNote(noteId, { cliente: val });
+      if (val) toast(`Cliente: ${val}`); else toast('Cliente rimosso');
+    } catch { toast('Errore aggiornamento cliente', 'error'); }
+    reload();
+  }
+  input.onblur = save;
+  input.onkeydown = e => {
+    if (e.key === 'Enter') input.blur();
+    if (e.key === 'Escape') reload();
+  };
+}
+
+function editStart(el, noteId, currentStart) {
+  const input = document.createElement('input');
+  input.type = 'date';
+  input.value = currentStart || '';
+  input.style.cssText = 'background:var(--surface2);border:1px solid var(--accent);border-radius:6px;color:var(--text);font-size:0.72rem;padding:1px 6px;outline:none;width:130px;';
+  el.replaceWith(input);
+  input.focus();
+
+  async function save() {
+    const val = input.value;
+    try {
+      await patchNote(noteId, { start_date: val || '' });
+      toast(val ? `Data inizio: ${val}` : 'Data inizio rimossa');
+    } catch { toast('Errore aggiornamento data inizio', 'error'); }
+    await loadNotes();
+  }
+  const reload = () => activeTab === 'activity' ? loadActivity() : loadNotes();
   input.onblur = save;
   input.onkeydown = e => {
     if (e.key === 'Enter') input.blur();
@@ -1555,7 +1802,7 @@ function editAssignee(el, noteId, currentAssignee) {
   input.focus();
   input.select();
 
-  const reload = () => activeTab === 'due' ? loadDueNotes() : loadNotes();
+  const reload = () => activeTab === 'activity' ? loadActivity() : loadNotes();
   async function save() {
     const merged = _parseAssignees(input.value).join(',');
     try {
@@ -1644,6 +1891,7 @@ function openSettings() {
   document.getElementById('settings-modal').classList.add('open');
   loadOllamaSettings();
   loadDocRoot();
+  loadApiToken();
   initSchedule();
 }
 function closeSettings(e) {
@@ -1678,11 +1926,36 @@ const GANTT_COLORS = ['#818cf8','#60a5fa','#34d399','#fbbf24','#f87171','#a78bfa
 let ganttSelectedColor = GANTT_COLORS[0];
 let ganttData = null;
 let ganttZoom = 'auto';
+let ganttRange = 'default';   // perimetro visibile: default | week | 2weeks | 3weeks | month | all
+let _expandedProjectId = null;   // un solo progetto espanso alla volta nella sidebar
+let _absencesExpanded = false;
+let ganttAbsenceSelectedColor = null;   // null = colore automatico dal nome (personColor)
+
+function personColor(name) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  return GANTT_COLORS[hash % GANTT_COLORS.length];
+}
+
+// Testo bianco o scuro a seconda della luminanza del colore, per garantire leggibilità
+// sopra un chip a tinta piena (funziona sia in tema chiaro che scuro).
+function _contrastText(hex) {
+  const c = (hex || '').replace('#', '');
+  if (c.length !== 6) return '#ffffff';
+  const r = parseInt(c.substr(0, 2), 16), g = parseInt(c.substr(2, 2), 16), b = parseInt(c.substr(4, 2), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.7 ? '#14161f' : '#ffffff';
+}
 
 function setGanttZoom(z) {
   ganttZoom = z;
   document.querySelectorAll('.gantt-zoom-btn').forEach(b => b.classList.remove('active'));
   document.getElementById(`zoom-${z}`).classList.add('active');
+  if (ganttData) renderGanttChart(ganttData);
+}
+
+function setGanttRange(r) {
+  ganttRange = r;
   if (ganttData) renderGanttChart(ganttData);
 }
 
@@ -1708,16 +1981,259 @@ async function loadGantt() {
     ganttData = await res.json();
     renderGanttPanel(ganttData);
     renderGanttChart(ganttData);
+    loadStreamDatalist();
   } catch(e) { console.error(e); }
 }
 
-function renderGanttPanel(data) {
-  const list = document.getElementById('gantt-projects-list');
-  if (!data.projects.length) {
-    list.innerHTML = '<div style="color:var(--text-dim);font-size:0.8rem;padding:8px 0">Nessun progetto. Aggiungine uno qui sotto.</div>';
+// ── Stream search (campo "stream" nel form nota) ──────────────────────────────
+let _streamLabelToId = {};
+
+async function loadStreamDatalist() {
+  try {
+    const res = await apiFetch('/api/gantt/streams/all');
+    const data = await res.json();
+    _streamLabelToId = {};
+    const list = document.getElementById('stream-datalist');
+    if (!list) return;
+    list.innerHTML = data.streams.map(s => {
+      _streamLabelToId[s.label] = s.id;
+      return `<option value="${escHtml(s.label)}"></option>`;
+    }).join('');
+  } catch {}
+}
+
+function _resolveStreamId(text) {
+  const t = (text || '').trim();
+  return t && _streamLabelToId[t] ? _streamLabelToId[t] : null;
+}
+
+function toggleAbsencesSection() {
+  _absencesExpanded = !_absencesExpanded;
+  renderAbsencesSection(ganttData);
+}
+
+// Riga di pallini colore selezionabili: 🎲 = automatico (dal nome, solo se includeAuto), poi la palette.
+// `makeOnclick(argLiteral)` deve restituire la stringa completa per l'attributo onclick.
+function _colorSwatchesHtml(selected, makeOnclick, includeAuto = true) {
+  const autoSel = !selected;
+  let html = `<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;">`;
+  if (includeAuto) {
+    html += `<div data-swatch title="Automatico (colore dal nome)" onclick="${makeOnclick('null')}"
+      style="width:16px;height:16px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;
+      font-size:0.5rem;border:2px solid ${autoSel ? 'var(--text)' : 'transparent'};background:var(--bg-hover);">🎲</div>`;
+  }
+  html += GANTT_COLORS.map(c => `<div data-swatch onclick="${makeOnclick(`'${c}'`)}"
+    style="width:16px;height:16px;border-radius:50%;cursor:pointer;background:${c};border:2px solid ${selected===c ? 'var(--text)' : 'transparent'};"></div>`).join('');
+  html += `</div>`;
+  return html;
+}
+
+let _projectColorPickerOpenId = null;
+
+function toggleProjectColorPicker(id, e) {
+  if (e) e.stopPropagation();
+  _projectColorPickerOpenId = _projectColorPickerOpenId === id ? null : id;
+  renderGanttPanel(ganttData);
+}
+
+async function setProjectColor(id, color) {
+  try {
+    const res = await apiFetch(`/api/gantt/projects/${id}`, {
+      method: 'PATCH',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({color}),
+    });
+    if (!res.ok) throw new Error();
+    _projectColorPickerOpenId = null;
+    await loadGantt();
+  } catch { toast('Errore', 'error'); }
+}
+
+function setGanttAbsenceFormColor(color, el) {
+  ganttAbsenceSelectedColor = color;
+  const picker = document.getElementById('gantt-absence-color-picker');
+  if (picker) picker.querySelectorAll('[data-swatch]').forEach(s => s.style.borderColor = 'transparent');
+  if (el) el.style.borderColor = 'var(--text)';
+}
+
+let _absenceColorPickerOpenId = null;
+
+function toggleAbsenceColorPicker(id) {
+  _absenceColorPickerOpenId = _absenceColorPickerOpenId === id ? null : id;
+  renderAbsencesSection(ganttData);
+}
+
+async function setAbsenceColor(id, color) {
+  try {
+    const res = await apiFetch(`/api/gantt/absences/${id}`, {
+      method: 'PATCH',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({color}),
+    });
+    if (!res.ok) throw new Error();
+    _absenceColorPickerOpenId = null;
+    await loadGantt();
+  } catch { toast('Errore', 'error'); }
+}
+
+function renderAbsencesSection(data) {
+  const el = document.getElementById('gantt-absences-section');
+  if (!el) return;
+  const absences = (data && data.absences) || [];
+  if (!_absencesExpanded) {
+    el.innerHTML = `<button class="gantt-add-ms-btn" onclick="toggleAbsencesSection()" style="padding-left:0;">
+      🌴 ${absences.length ? `${absences.length} assenz${absences.length===1?'a':'e'}` : 'nessuna assenza'} <span style="opacity:0.6;">▶</span>
+    </button>`;
     return;
   }
-  // Sezione archivio in fondo
+  el.innerHTML = `
+    <button class="gantt-add-ms-btn" onclick="toggleAbsencesSection()" style="padding-left:0;">🌴 Assenze ▼</button>
+    <div style="display:flex;flex-direction:column;gap:4px;margin:4px 0 8px;">
+      ${absences.map(a => `
+        <div class="gantt-archived-item" style="flex-wrap:wrap;">
+          <span onclick="toggleAbsenceColorPicker(${a.id})" title="Cambia colore" style="width:12px;height:12px;border-radius:50%;background:${a.color || personColor(a.person)};flex-shrink:0;cursor:pointer;"></span>
+          <span style="flex:1;font-size:0.76rem;color:var(--text);">${escHtml(a.person)} <span style="color:var(--text-dim);font-size:0.68rem;">${a.start_date} → ${a.end_date}</span></span>
+          <button onclick="deleteAbsence(${a.id})" title="Elimina assenza" style="background:none;border:1px solid var(--border);border-radius:5px;color:var(--text-muted);font-size:0.68rem;padding:2px 8px;cursor:pointer;">✕</button>
+          ${_absenceColorPickerOpenId === a.id ? `<div style="width:100%;padding:4px 0 2px 18px;">${_colorSwatchesHtml(a.color, (arg) => `setAbsenceColor(${a.id},${arg})`)}</div>` : ''}
+        </div>
+      `).join('') || `<div style="color:var(--text-dim);font-size:0.72rem;">Nessuna assenza registrata.</div>`}
+    </div>
+    <button class="gantt-add-ms-btn" onclick="toggleAddAbsenceForm(this)">+ assenza</button>
+    <form class="gantt-add-ms-form" id="gantt-absence-form" onsubmit="addAbsence(event)">
+      <input class="gantt-input" name="person" placeholder="Nome persona" maxlength="80" required style="font-size:0.75rem;padding:3px 7px;">
+      <div style="display:flex;gap:4px;">
+        <input class="gantt-input" type="date" name="start" required style="font-size:0.75rem;padding:3px 7px;">
+        <input class="gantt-input" type="date" name="end" required style="font-size:0.75rem;padding:3px 7px;">
+      </div>
+      <div id="gantt-absence-color-picker">${_colorSwatchesHtml(ganttAbsenceSelectedColor, (arg) => `setGanttAbsenceFormColor(${arg}, this)`)}</div>
+      <div style="display:flex;gap:4px;">
+        <button type="submit" class="gantt-btn-sm">Aggiungi</button>
+        <button type="button" class="gantt-btn-sm" onclick="toggleAddAbsenceForm(this.closest('form').previousElementSibling)">Annulla</button>
+      </div>
+    </form>`;
+}
+
+function toggleAddAbsenceForm(btn) {
+  document.getElementById('gantt-absence-form').classList.toggle('open');
+}
+
+async function addAbsence(e) {
+  e.preventDefault();
+  const form = e.target;
+  const person = form.person.value.trim();
+  const start = form.start.value;
+  const end = form.end.value;
+  if (!person || !start || !end) return;
+  try {
+    const res = await apiFetch('/api/gantt/absences', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({person, start_date: start, end_date: end, color: ganttAbsenceSelectedColor}),
+    });
+    if (!res.ok) throw new Error();
+    ganttAbsenceSelectedColor = null;
+    toast('Assenza aggiunta', 'success');
+    await loadGantt();
+  } catch { toast('Errore', 'error'); }
+}
+
+async function deleteAbsence(id) {
+  try {
+    const res = await apiFetch(`/api/gantt/absences/${id}`, {method:'DELETE'});
+    if (!res.ok) throw new Error();
+    toast('Assenza eliminata');
+    await loadGantt();
+  } catch { toast('Errore eliminazione', 'error'); }
+}
+
+function _renderStreamItem(s, color) {
+  const dates = (s.start_date && s.end_date) ? `<span class="gantt-ms-dates">${s.start_date} → ${s.end_date}</span>`
+              : `<span class="gantt-ms-dates" style="font-style:italic;">senza date</span>`;
+  return `
+    <div class="gantt-ms-item" data-mid="${s.id}" onclick="editGanttStream(${s.id})" title="Clicca per modificare nome/date">
+      <span style="width:6px;height:6px;border-radius:50%;background:${color};flex-shrink:0;display:inline-block;margin-top:4px"></span>
+      <div class="gantt-ms-body">
+        <span>🏁 ${escHtml(s.name)}</span>
+        ${dates}
+        ${s.linked_notes && s.linked_notes.length ? `<span style="font-size:0.62rem;background:var(--accent-dim);color:var(--accent);border-radius:4px;padding:1px 5px;margin-left:4px;">📎 ${s.linked_notes.length}</span>` : ''}
+      </div>
+      <button class="gantt-ms-del" onclick="event.stopPropagation();deleteStream(${s.id},event)" title="Elimina">✕</button>
+    </div>`;
+}
+
+function toggleProjectExpand(id) {
+  _expandedProjectId = (_expandedProjectId === id) ? null : id;
+  renderGanttPanel(ganttData);
+}
+
+async function setProjectDate(id, field, value) {
+  try {
+    const res = await apiFetch(`/api/gantt/projects/${id}`, {
+      method: 'PATCH',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ [field]: value || '' }),
+    });
+    if (!res.ok) throw new Error();
+    await loadGantt();
+  } catch { toast('Errore', 'error'); }
+}
+
+function _renderProjectItem(p, clients) {
+  const expanded = p.id === _expandedProjectId;
+  const body = expanded ? `
+      ${!p.is_background ? `
+      <div style="display:flex;gap:4px;align-items:center;padding:2px 0 8px;">
+        <span style="font-size:0.68rem;color:var(--text-dim);flex-shrink:0;">Periodo:</span>
+        <input class="gantt-input" type="date" value="${p.start_date || ''}" onchange="setProjectDate(${p.id},'start_date',this.value)" style="font-size:0.68rem;padding:2px 3px;width:auto;min-width:0;flex:1;">
+        <span style="color:var(--text-dim);flex-shrink:0;">→</span>
+        <input class="gantt-input" type="date" value="${p.end_date || ''}" onchange="setProjectDate(${p.id},'end_date',this.value)" style="font-size:0.68rem;padding:2px 3px;width:auto;min-width:0;flex:1;">
+      </div>` : ''}
+      <div class="gantt-milestones-list">
+        ${(p.streams || []).map(s => _renderStreamItem(s, p.color)).join('') || `<div style="color:var(--text-dim);font-size:0.72rem;padding:2px 0 6px">Nessuno stream.</div>`}
+      </div>
+      <button class="gantt-add-ms-btn" onclick="toggleAddStream(${p.id},this)">+ stream</button>
+      <form class="gantt-add-ms-form" id="gantt-stream-form-${p.id}" onsubmit="addStream(event,${p.id})">
+        <input class="gantt-input" name="name" placeholder="Nome stream" maxlength="80" required style="font-size:0.75rem;padding:3px 7px;">
+        <div style="display:flex;gap:4px;">
+          <input class="gantt-input" type="date" name="start" style="font-size:0.75rem;padding:3px 7px;">
+          <input class="gantt-input" type="date" name="end" style="font-size:0.75rem;padding:3px 7px;">
+        </div>
+        <div style="display:flex;gap:4px;">
+          <button type="submit" class="gantt-btn-sm">Aggiungi</button>
+          <button type="button" class="gantt-btn-sm" onclick="toggleAddStream(${p.id},this.closest('form').previousElementSibling)">Annulla</button>
+        </div>
+      </form>` : '';
+
+  const colorPickerOpen = p.id === _projectColorPickerOpenId;
+  return `
+    <div class="gantt-project-item">
+      <div class="gantt-project-header" onclick="toggleProjectExpand(${p.id})">
+        <span style="font-size:0.6rem;color:var(--text-dim);width:10px;">${expanded ? '▼' : '▶'}</span>
+        <div class="gantt-project-dot" onclick="toggleProjectColorPicker(${p.id},event)" title="Cambia colore" style="background:${p.color};cursor:pointer;"></div>
+        <span class="gantt-project-name">${escHtml(p.name)}</span>
+        ${p.is_background ?`<span style="font-size:0.62rem;background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:1px 5px;color:var(--text-muted);margin-left:2px;">sfondo</span>` : ''}
+        <button class="gantt-project-archive" onclick="event.stopPropagation();archiveGanttProject(${p.id},event)" title="Archivia progetto" style="opacity:0;transition:opacity 0.15s;">📦</button>
+        <button class="gantt-project-del" onclick="event.stopPropagation();deleteGanttProject(${p.id},event)" title="Elimina progetto">✕</button>
+      </div>
+      ${colorPickerOpen ? `<div style="padding:2px 0 6px 28px;">${_colorSwatchesHtml(p.color, (arg) => `setProjectColor(${p.id},${arg})`, false)}</div>` : ''}
+      ${body}
+    </div>
+  `;
+}
+
+function renderGanttPanel(data) {
+  renderAbsencesSection(data);
+  if (_projectColorPickerOpenId && !data.projects.some(p => p.id === _projectColorPickerOpenId)) {
+    _projectColorPickerOpenId = null;
+  }
+  if (_expandedProjectId && !data.projects.some(p => p.id === _expandedProjectId)) {
+    _expandedProjectId = null;
+  }
+  const list = document.getElementById('gantt-projects-list');
+
+  // Sezione archivio in fondo — va calcolata anche se non ci sono progetti attivi,
+  // altrimenti un utente con tutti i progetti archiviati non avrebbe modo di
+  // raggiungere il pulsante "ripristina".
   const archivedHtml = (data.archived_projects && data.archived_projects.length) ? `
     <div class="gantt-archive-section" id="gantt-archive-section">
       <button class="gantt-archive-toggle" onclick="toggleGanttArchive()" id="gantt-archive-toggle">
@@ -1735,46 +2251,32 @@ function renderGanttPanel(data) {
       </div>
     </div>` : '';
 
-  list.innerHTML = data.projects.map(p => `
-    <div class="gantt-project-item">
-      <div class="gantt-project-header">
-        <div class="gantt-project-dot" style="background:${p.color}"></div>
-        <span class="gantt-project-name">${escHtml(p.name)}</span>
-        ${p.is_background ? `<span style="font-size:0.62rem;background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:1px 5px;color:var(--text-muted);margin-left:2px;">sfondo</span>` : ''}
-        <button class="gantt-project-archive" onclick="archiveGanttProject(${p.id},event)" title="Archivia progetto" style="opacity:0;transition:opacity 0.15s;">📦</button>
-        <button class="gantt-project-del" onclick="deleteGanttProject(${p.id},event)" title="Elimina progetto">✕</button>
-      </div>
-      <div class="gantt-milestones-list">
-        ${p.milestones.map(m => `
-          <div class="gantt-ms-item" data-mid="${m.id}" onclick="editGanttMilestone(${m.id})" title="Clicca per modificare date e nome">
-            <span style="width:6px;height:6px;border-radius:50%;background:${p.color};flex-shrink:0;display:inline-block;margin-top:4px"></span>
-            <div class="gantt-ms-body">
-              <span>${escHtml(m.name)}</span>
-              <span class="gantt-ms-dates">${m.start_date} → ${m.end_date}</span>
-              <span class="gantt-ms-progress-row" title="${m.progress_done || 0}/${m.progress_total || 0} note completate">
-                <span class="gantt-ms-progress"><span style="width:${m.progress || 0}%"></span></span>
-                <span class="gantt-ms-progress-label">${m.progress || 0}%</span>
-              </span>
-              ${m.linked_notes && m.linked_notes.length ? `<span style="font-size:0.62rem;background:var(--accent-dim);color:var(--accent);border-radius:4px;padding:1px 5px;margin-left:4px;">📎 ${m.linked_notes.length}</span>` : ''}
-            </div>
-            <button class="gantt-ms-del" onclick="event.stopPropagation();deleteMilestone(${m.id},event)" title="Elimina">✕</button>
-          </div>
-        `).join('')}
-      </div>
-      <button class="gantt-add-ms-btn" onclick="toggleAddMilestone(${p.id},this)">+ milestone</button>
-      <form class="gantt-add-ms-form" id="gantt-ms-form-${p.id}" onsubmit="addMilestone(event,${p.id})">
-        <input class="gantt-input" name="name" placeholder="Nome milestone" maxlength="80" required style="font-size:0.75rem;padding:3px 7px;">
-        <div style="display:flex;gap:4px;">
-          <input class="gantt-input" type="date" name="start" required style="font-size:0.75rem;padding:3px 7px;">
-          <input class="gantt-input" type="date" name="end" required style="font-size:0.75rem;padding:3px 7px;">
-        </div>
-        <div style="display:flex;gap:4px;">
-          <button type="submit" class="gantt-btn-sm">Aggiungi</button>
-          <button type="button" class="gantt-btn-sm" onclick="toggleAddMilestone(${p.id},this.closest('form').previousElementSibling)">Annulla</button>
-        </div>
-      </form>
-    </div>
-  `).join('') + archivedHtml;
+  if (!data.projects.length) {
+    list.innerHTML = '<div style="color:var(--text-dim);font-size:0.8rem;padding:8px 0">Nessun progetto. Aggiungine uno qui sotto.</div>' + archivedHtml;
+    return;
+  }
+
+  // Raggruppa i progetti per cliente — "Senza cliente" in fondo
+  const groups = new Map();
+  for (const p of data.projects) {
+    const key = p.client_id || 'none';
+    if (!groups.has(key)) groups.set(key, { name: p.client_name, projects: [] });
+    groups.get(key).projects.push(p);
+  }
+  const withClient = [...groups.entries()].filter(([k]) => k !== 'none');
+  const withoutClient = groups.get('none');
+
+  let groupsHtml = withClient.map(([_, g]) => `
+    <div class="gantt-panel-title" style="font-size:0.7rem;margin-top:14px;">🏢 ${escHtml(g.name)}</div>
+    ${g.projects.map(p => _renderProjectItem(p, data.clients)).join('')}
+  `).join('');
+  if (withoutClient) {
+    groupsHtml += `
+    <div class="gantt-panel-title" style="font-size:0.7rem;margin-top:14px;color:var(--text-dim);">Senza cliente</div>
+    ${withoutClient.projects.map(p => _renderProjectItem(p, data.clients)).join('')}`;
+  }
+
+  list.innerHTML = groupsHtml + archivedHtml;
 }
 
 function toggleGanttArchive() {
@@ -1803,55 +2305,125 @@ async function unarchiveGanttProject(id, e) {
   } catch { toast('Errore', 'error'); }
 }
 
-function toggleAddMilestone(projectId, btn) {
-  const form = document.getElementById(`gantt-ms-form-${projectId}`);
+function toggleAddStream(projectId, btn) {
+  const form = document.getElementById(`gantt-stream-form-${projectId}`);
   form.classList.toggle('open');
+}
+
+async function addStream(e, projectId) {
+  e.preventDefault();
+  const form = e.target;
+  const name = form.name.value.trim();
+  if (!name) return;
+  const start = form.start ? form.start.value : '';
+  const end = form.end ? form.end.value : '';
+  try {
+    const res = await apiFetch('/api/gantt/streams', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({project_id: projectId, name, start_date: start || null, end_date: end || null}),
+    });
+    if (!res.ok) throw new Error();
+    form.reset();
+    form.classList.remove('open');
+    toast('Stream aggiunto', 'success');
+    await loadGantt();
+  } catch { toast('Errore', 'error'); }
+}
+
+async function deleteStream(id, e) {
+  e.stopPropagation();
+  try {
+    const res = await apiFetch(`/api/gantt/streams/${id}`, {method:'DELETE'});
+    if (!res.ok) throw new Error();
+    toast('Stream eliminato');
+    await loadGantt();
+  } catch { toast('Errore eliminazione', 'error'); }
+}
+
+// Stream con entrambe le date — solo questi possono comparire come barre
+// sulla timeline (uno Stream senza date esiste comunque come contenitore
+// di note, visibile solo nel pannello laterale).
+function _datedStreams(p) {
+  return (p.streams || []).filter(s => s.start_date && s.end_date);
 }
 
 function renderGanttChart(data) {
   const chart = document.getElementById('gantt-chart');
-  if (!data.projects.length || !data.projects.some(p => p.milestones.length)) {
-    chart.innerHTML = '<div class="gantt-empty">Aggiungi un progetto e le sue milestone per visualizzare il Gantt.<br>Le note con scadenza appariranno come ◆ sulla timeline.</div>';
+  const absences = data.absences || [];
+  const hiddenNotes = _loadHidden();   // una nota nascosta (Board/Note) si nasconde anche qui
+  const hasDatedWork = data.projects.some(p => _datedStreams(p).length);
+  if (!hasDatedWork && !absences.length) {
+    chart.innerHTML = '<div class="gantt-empty">Aggiungi un progetto e le sue fasi (con date) per visualizzare il Gantt.<br>Le note con scadenza appariranno come ◆ sulla timeline.</div>';
     return;
   }
 
-  // Calculate date range
-  let minDate = null, maxDate = null;
+  // Sempre data locale (evita offset UTC in CEST/CET)
+  function _lds(d) {
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  }
+  const _now = new Date();
+  const todayStr = _lds(_now);
+
+  // Calculate full data date range (serve per il perimetro "Tutto" e come verifica che
+  // esista almeno una fase datata) — la start date minima segue solo cliente/progetto,
+  // le assenze non devono anticiparla ma possono estendere la fine se durano più a
+  // lungo di qualsiasi progetto. Se non esiste ancora nessuna fase datata (solo
+  // assenze), l'intervallo lo definiscono loro.
+  let dataMinDate = null, dataMaxDate = null;
   for (const p of data.projects) {
-    for (const m of p.milestones) {
-      if (!minDate || m.start_date < minDate) minDate = m.start_date;
-      if (!maxDate || m.end_date > maxDate) maxDate = m.end_date;
+    if (p.start_date && (!dataMinDate || p.start_date < dataMinDate)) dataMinDate = p.start_date;
+    if (p.end_date && (!dataMaxDate || p.end_date > dataMaxDate)) dataMaxDate = p.end_date;
+    for (const m of _datedStreams(p)) {
+      if (!dataMinDate || m.start_date < dataMinDate) dataMinDate = m.start_date;
+      if (!dataMaxDate || m.end_date > dataMaxDate) dataMaxDate = m.end_date;
     }
   }
-  if (!minDate) { chart.innerHTML = '<div class="gantt-empty">Aggiungi delle milestone per visualizzare il Gantt.</div>'; return; }
+  const hasProjectMinDate = !!dataMinDate;
+  for (const a of absences) {
+    if (!hasProjectMinDate && (!dataMinDate || a.start_date < dataMinDate)) dataMinDate = a.start_date;
+    if (!dataMaxDate || a.end_date > dataMaxDate) dataMaxDate = a.end_date;
+  }
+  if (!dataMinDate) { chart.innerHTML = '<div class="gantt-empty">Aggiungi delle fasi con date per visualizzare il Gantt.</div>'; return; }
 
-  // Add padding
-  const startD = new Date(minDate + 'T00:00:00'); startD.setDate(startD.getDate() - 3);
-  const endD = new Date(maxDate + 'T00:00:00'); endD.setDate(endD.getDate() + 7);
+  // Perimetro visibile: "Tutto" mostra l'intero intervallo dei dati (comportamento
+  // storico); le altre opzioni sono finestre ancorate a oggi (con un piccolo margine
+  // sui giorni passati per non perdere di vista cose appena chiuse/in ritardo),
+  // indipendenti dai dati — così il selettore si comporta come un vero calendario.
+  let startD, endD;
+  if (ganttRange === 'all') {
+    startD = new Date(dataMinDate + 'T00:00:00'); startD.setDate(startD.getDate() - 3);
+    endD = new Date(dataMaxDate + 'T00:00:00'); endD.setDate(endD.getDate() + 7);
+  } else {
+    const RANGE_FORWARD_DAYS = { default: 18, week: 7, '2weeks': 14, '3weeks': 21, month: 30 };
+    const fwd = RANGE_FORWARD_DAYS[ganttRange] ?? 18;
+    startD = new Date(_now.getFullYear(), _now.getMonth(), _now.getDate() - 3);
+    endD = new Date(_now.getFullYear(), _now.getMonth(), _now.getDate() + fwd);
+  }
   const totalMs = endD - startD;
   const totalDays = totalMs / 86400000;
+  const startDStr = _lds(startD), endDStr = _lds(endD);
+  // Un item [s,e] è visibile se il suo intervallo interseca il perimetro corrente.
+  function _inRange(s, e) {
+    const ss = (s || '').slice(0, 10), ee = (e || s || '').slice(0, 10);
+    return !(ee < startDStr || ss > endDStr);
+  }
 
   function pct(dateStr) {
     const d = new Date(dateStr + 'T00:00:00');
     return Math.max(0, Math.min(100, (d - startD) / totalMs * 100)).toFixed(2);
   }
-  // Sempre data locale (evita offset UTC in CEST/CET)
-  function _lds(d) {
-    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-  }
 
-  const _now = new Date();
-  const todayStr = _lds(_now);
   const _warnD = new Date(_now); _warnD.setDate(_warnD.getDate()+7);
   const warnCutoff = _lds(_warnD);
 
   // Compute at-risk milestones (end_date within 7 days + project has blocked/wip notes)
   const atRiskList = [];
   for (const p of data.projects) {
-    for (const m of p.milestones) {
+    for (const m of _datedStreams(p)) {
       m._atRisk = p.has_risk_blocker && m.end_date >= todayStr && m.end_date <= warnCutoff;
       m._overdue = m.end_date < todayStr;
-      if (m._atRisk) atRiskList.push({ project: p.name, milestone: m.name, end: m.end_date });
+      if (m._atRisk) atRiskList.push({ project: p.name, stream: m.name, end: m.end_date });
     }
   }
 
@@ -1928,30 +2500,113 @@ function renderGanttChart(data) {
   const todayLeft = pct(todayStr);
   const todayLine = `<div class="gantt-today-line" style="left:${todayLeft}%" title="Oggi"></div>`;
 
-  // Build background bands (ferie, etc.) — rendered as absolute overlays
-  const bgProjects = data.projects.filter(p => p.is_background && p.milestones.length);
-  let bgBandsHtml = bgProjects.flatMap(p => p.milestones.map(m => {
+  // Build background bands (ferie, etc.) — rendered as absolute overlays.
+  // Solo le fasi che ricadono nel perimetro visibile, altrimenti farebbero solo
+  // rumore (bande completamente fuori vista schiacciate ai bordi).
+  const bgProjects = data.projects.filter(p => p.is_background && _datedStreams(p).some(m => _inRange(m.start_date, m.end_date)));
+  let bgBandsHtml = bgProjects.flatMap(p => _datedStreams(p).filter(m => _inRange(m.start_date, m.end_date)).map(m => {
     const left = pct(m.start_date);
     const endExcl = new Date(m.end_date + 'T00:00:00'); endExcl.setDate(endExcl.getDate()+1);
     const width = Math.max(parseFloat(pct(_lds(endExcl))) - parseFloat(left), oneDayPct).toFixed(2);
     const col = p.color;
     return `<div class="gantt-bg-band" style="left:${left}%;width:${width}%;background:${col};border-color:${col};"></div>
-            <div class="gantt-bg-label" style="left:${left}%;width:${width}%;color:${col};">${escHtml(p.name)}: ${escHtml(m.name)}</div>`;
+            <div class="gantt-bg-label" style="left:${left}%;max-width:${width}%;background:${col};color:${_contrastText(col)};">${escHtml(p.name)}: ${escHtml(m.name)}</div>`;
   })).join('');
 
-  // Build rows (normal projects only)
-  let rowsHtml = '';
-  for (const p of data.projects) {
-    if (p.is_background || !p.milestones.length) continue;
+  // Righe assenze — in cima al grafico come proprie righe (bar per persona), per
+  // evidenziare in cascata i periodi di assenza rispetto a tutti i progetti sotto.
+  // Solo quelle visibili nel perimetro corrente.
+  const visibleAbsences = absences.filter(a => _inRange(a.start_date, a.end_date));
+
+  // In più, come le bande "sfondo" dei progetti (es. FERIE): una tinta verticale
+  // che attraversa tutto il grafico (tutti i clienti/progetti sotto), per rendere
+  // visibile a colpo d'occhio la sovrapposizione col periodo di assenza. Niente
+  // etichetta qui — quella leggibile è già nella riga dedicata sopra.
+  const absenceBgBandsHtml = visibleAbsences.map(a => {
+    const left = pct(a.start_date);
+    const endExcl = new Date(a.end_date + 'T00:00:00'); endExcl.setDate(endExcl.getDate()+1);
+    const width = Math.max(parseFloat(pct(_lds(endExcl))) - parseFloat(left), oneDayPct).toFixed(2);
+    const col = a.color || personColor(a.person);
+    return `<div class="gantt-bg-band" style="left:${left}%;width:${width}%;background:${col};border-color:${col};"></div>`;
+  }).join('');
+
+  const absenceRowsHtml = visibleAbsences.length ? `
+    <div class="gantt-row" style="margin-bottom:2px;position:relative;z-index:1;">
+      <div class="gantt-row-label project">🌴 Assenze</div>
+      <div class="gantt-row-track" style="height:4px;"><div class="gantt-track-bg" style="opacity:0.3"></div>${todayLine}</div>
+    </div>
+    ${visibleAbsences.map(a => {
+      const barLeft = pct(a.start_date);
+      const endExcl = new Date(a.end_date + 'T00:00:00'); endExcl.setDate(endExcl.getDate()+1);
+      const barWidth = Math.max(parseFloat(pct(_lds(endExcl))) - parseFloat(barLeft), oneDayPct).toFixed(2);
+      const col = a.color || personColor(a.person);
+      return `
+      <div class="gantt-row">
+        <div class="gantt-row-label">${escHtml(a.person)}</div>
+        <div class="gantt-row-track">
+          <div class="gantt-track-bg"></div>
+          ${todayLine}
+          <div class="gantt-bar" style="left:${barLeft}%;width:${barWidth}%;background:${col};color:${_contrastText(col)};" title="${escHtml(a.person)}: ${a.start_date} → ${a.end_date}">
+            <span class="gantt-bar-label">🌴 ${escHtml(a.person)}</span>
+          </div>
+        </div>
+      </div>`;
+    }).join('')}
+  ` : '';
+
+  // Solo le fasi che ricadono nel perimetro visibile — un progetto compare nel
+  // grafico solo se ne ha almeno una in vista (stesso criterio di prima, ma
+  // ristretto al periodo selezionato invece che a tutto lo storico).
+  function _rangeDatedStreams(p) {
+    return _datedStreams(p).filter(m => _inRange(m.start_date, m.end_date));
+  }
+
+  // Ordina i progetti per cliente, poi per nome progetto, poi per data fine (ASC) —
+  // i progetti senza cliente vanno in fondo.
+  function _projectEndDate(p) {
+    return _rangeDatedStreams(p).reduce((max, m) => (!max || m.end_date > max) ? m.end_date : max, null);
+  }
+  // Ogni progetto normale (non sfondo) compare nel grafico anche senza nessuno
+  // Stream datato — basta che esista (creato automaticamente da una nota con
+  // cliente+progetto): resta una riga senza barre finché non gli si aggiungono
+  // date, così è visibile e modificabile da qui invece di sparire nel nulla.
+  const chartProjects = data.projects.filter(p => !p.is_background);
+  chartProjects.sort((a, b) => {
+    const aHasClient = !!a.client_name, bHasClient = !!b.client_name;
+    if (aHasClient !== bHasClient) return aHasClient ? -1 : 1;
+    const ca = (a.client_name || '').toLowerCase(), cb = (b.client_name || '').toLowerCase();
+    if (ca !== cb) return ca < cb ? -1 : 1;
+    const na = a.name.toLowerCase(), nb = b.name.toLowerCase();
+    if (na !== nb) return na < nb ? -1 : 1;
+    const ea = _projectEndDate(a) || '', eb = _projectEndDate(b) || '';
+    return ea < eb ? -1 : ea > eb ? 1 : 0;
+  });
+
+  // Build rows (assenze in cima, poi progetti normali)
+  let rowsHtml = absenceRowsHtml;
+  for (const p of chartProjects) {
+    const datedMs = _rangeDatedStreams(p);
+    const projectLabel = p.client_name ? `${escHtml(p.client_name)} - ${escHtml(p.name)}` : escHtml(p.name);
+    // Il periodo del progetto (se impostato) racchiude visivamente i suoi
+    // Stream sottostanti — è il progetto principale, gli Stream vivono dentro.
+    const hasProjectPeriod = p.start_date && p.end_date && _inRange(p.start_date, p.end_date);
+    let projectBarHtml = '';
+    if (hasProjectPeriod) {
+      const pLeft = pct(p.start_date);
+      const pEndExcl = new Date(p.end_date + 'T00:00:00'); pEndExcl.setDate(pEndExcl.getDate()+1);
+      const pWidth = Math.max(parseFloat(pct(_lds(pEndExcl))) - parseFloat(pLeft), oneDayPct).toFixed(2);
+      projectBarHtml = `<div class="gantt-project-bar" style="left:${pLeft}%;width:${pWidth}%;border-color:${p.color};" title="Periodo progetto: ${p.start_date} → ${p.end_date}"></div>`;
+    }
     // Project label row
     rowsHtml += `
     <div class="gantt-row" style="margin-bottom:2px;margin-top:12px;position:relative;z-index:1;">
-      <div class="gantt-row-label project">${escHtml(p.name)}</div>
-      <div class="gantt-row-track" style="height:4px;"><div class="gantt-track-bg" style="opacity:0.3"></div>${todayLine}</div>
+      <div class="gantt-row-label project">${projectLabel}</div>
+      <div class="gantt-row-track" style="height:${hasProjectPeriod ? '10px' : '4px'};"><div class="gantt-track-bg" style="opacity:0.3"></div>${todayLine}${projectBarHtml}</div>
     </div>`;
 
-    // Milestone rows
-    for (const m of p.milestones) {
+    // Milestone rows (solo quelle con entrambe le date — le altre restano
+    // visibili solo nel pannello laterale, vedi _datedStreams)
+    for (const m of datedMs) {
       const barLeft = pct(m.start_date);
       const barRight = pct(m.end_date);
       const barWidth = Math.max(parseFloat(barRight) - parseFloat(barLeft), oneDayPct).toFixed(2);
@@ -1966,44 +2621,72 @@ function renderGanttChart(data) {
         <div class="gantt-row-track">
           <div class="gantt-track-bg"></div>
           ${todayLine}
-          <div class="gantt-bar" style="left:${barLeft}%;width:${barWidth}%;background:${p.color};${riskStyle}" title="${m.start_date} → ${m.end_date} · ${m.progress || 0}% completato">
-            <span class="gantt-bar-progress" style="width:${m.progress || 0}%"></span>
-            <span class="gantt-bar-label">${escHtml(m.name)}${riskBadge} · ${m.progress || 0}%</span>
+          <div class="gantt-bar" style="left:${barLeft}%;width:${barWidth}%;background:${p.color};${riskStyle}" title="${m.start_date} → ${m.end_date}">
+            <span class="gantt-bar-label">${escHtml(m.name)}${riskBadge}</span>
           </div>
         </div>
       </div>`;
-      // Sub-task notes linked to this milestone
-      if (m.linked_notes && m.linked_notes.length) {
-        for (const ln of m.linked_notes) {
-          const lnDate = ln.due_date || ln.created_at;
-          const lnLeft = pct(lnDate);
-          const statusIcon = {todo:'⬜',discuss:'💬',wip:'🔄',done:'✅',waiting:'⏳',blocked:'🚫',backlog:'🗂'}[ln.status] || '·';
+      // Sub-task notes linked to this milestone, già ordinate per periodo dal
+      // backend (solo quelle visibili nel perimetro corrente e non nascoste)
+      const visibleLinkedNotes = (m.linked_notes || []).filter(ln => {
+        if (hiddenNotes.has(ln.id)) return false;
+        const d = ln.start_date || ln.due_date || ln.created_at;
+        return _inRange(d, d);
+      });
+      if (visibleLinkedNotes.length) {
+        for (const ln of visibleLinkedNotes) {
+          const lnDate = ln.start_date || ln.due_date || ln.created_at;
+          const statusIcon = STATUS_EMOJI[ln.status] || '·';
           const doneStyle = ln.status === 'done' ? 'opacity:0.4;text-decoration:line-through' : '';
+          // Se ha sia start che due date, una barra (start -> due), non solo un puntino.
+          const markerHtml = (ln.start_date && ln.due_date)
+            ? (() => {
+                const barLeft = pct(ln.start_date);
+                const barRight = pct(ln.due_date);
+                const barWidth = Math.max(parseFloat(barRight) - parseFloat(barLeft), oneDayPct).toFixed(2);
+                return `<div class="gantt-subnote-bar" style="left:${barLeft}%;width:${barWidth}%;background:${p.color};${ln.status==='done'?'opacity:0.35':''}" title="${escHtml(ln.content)} (${ln.start_date} → ${ln.due_date})"></div>`;
+              })()
+            : `<div class="gantt-subnote-pin" style="left:${pct(lnDate)}%;background:${p.color};${ln.status==='done'?'opacity:0.35':''}" title="${escHtml(ln.content)} (${lnDate})"></div>`;
           rowsHtml += `
           <div class="gantt-row gantt-subnote-row">
             <div class="gantt-row-label" style="${doneStyle};padding-left:18px;font-size:0.64rem;gap:4px;">
               <span style="font-size:0.7em;">${statusIcon}</span>
-              <a href="#" onclick="goToNote(event,'${ln.created_at}')" title="${escHtml(ln.content)}"
-                 style="color:var(--text-dim);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+              <a href="#" onclick="goToNote(event,'${ln.created_at}')"
+                 style="color:var(--text-dim);text-decoration:none;"
                  onmouseover="this.style.color='var(--accent)'"
-                 onmouseout="this.style.color='var(--text-dim)'">${escHtml(ln.content.length > 30 ? ln.content.slice(0,30)+'…' : ln.content)}</a>
+                 onmouseout="this.style.color='var(--text-dim)'">${escHtml(ln.content)}</a>
             </div>
             <div class="gantt-row-track" style="height:20px;">
               ${todayLine}
-              <div class="gantt-subnote-pin" style="left:${lnLeft}%;background:${p.color};${ln.status==='done'?'opacity:0.35':''}" title="${escHtml(ln.content)} (${lnDate})"></div>
+              ${markerHtml}
             </div>
           </div>`;
         }
       }
     }
 
-    // One row per note with due_date
-    for (const n of p.notes) {
-      const noteLeft = pct(n.due_date);
+    // One row per note with due_date (solo quelle visibili nel perimetro e non
+    // nascoste). Se la nota ha anche start_date, si mostra come barra (start ->
+    // due), non solo come puntino sulla scadenza. Il marker sul singolo punto è
+    // l'emoji di stato — per "todo" (o nessuno stato) resta il rombo rosso.
+    for (const n of p.notes.filter(n => !hiddenNotes.has(n.id) && _inRange(n.start_date || n.due_date, n.due_date))) {
       const assigneeTip = n.assignee ? ` · @${n.assignee}` : '';
-      const tooltip = `#${n.id} ${n.content} (${n.due_date})${assigneeTip}`;
-      const labelText = `#${n.id} ${n.content.length > 28 ? n.content.slice(0, 28) + '…' : n.content}`;
+      const tooltip = `(${n.start_date ? n.start_date + ' → ' : ''}${n.due_date})${assigneeTip}`;
+      const labelText = `#${n.id} ${n.content}`;
       const doneStyle = n.status === 'done' ? 'opacity:0.45;text-decoration:line-through' : '';
+      const isPlainTodo = !n.status || n.status === 'todo';
+      const markerHtml = n.start_date
+        ? (() => {
+            const barLeft = pct(n.start_date);
+            const barRight = pct(n.due_date);
+            const barWidth = Math.max(parseFloat(barRight) - parseFloat(barLeft), oneDayPct).toFixed(2);
+            return `<div class="gantt-bar" style="left:${barLeft}%;width:${barWidth}%;background:var(--red);${n.status==='done'?'opacity:0.35':''}" title="${escHtml(tooltip)}">
+                      <span class="gantt-bar-label">${escHtml(n.content)}</span>
+                    </div>`;
+          })()
+        : (isPlainTodo
+            ? `<div class="gantt-diamond overdue" style="left:${pct(n.due_date)}%;background:var(--red);" title="${escHtml(tooltip)}"></div>`
+            : `<div class="gantt-note-emoji" style="left:${pct(n.due_date)}%;" title="${escHtml(tooltip)}">${STATUS_EMOJI[n.status] || '⬜'}</div>`);
       rowsHtml += `
       <div class="gantt-row gantt-notes-row">
         <div class="gantt-row-label" style="${doneStyle}">
@@ -2011,7 +2694,7 @@ function renderGanttChart(data) {
         </div>
         <div class="gantt-row-track" style="height:24px;">
           ${todayLine}
-          <div class="gantt-diamond overdue" style="left:${noteLeft}%;background:var(--red);${n.status==='done'?'opacity:0.35':''}" title="${escHtml(tooltip)}"></div>
+          ${markerHtml}
         </div>
       </div>`;
     }
@@ -2019,8 +2702,8 @@ function renderGanttChart(data) {
 
   const warningPanel = atRiskList.length ? `
   <div style="background:rgba(234,179,8,0.08);border:1px solid var(--yellow);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:0.78rem;">
-    <div style="font-weight:700;color:var(--yellow);margin-bottom:6px;">⚠️ ${atRiskList.length} milestone a rischio</div>
-    ${atRiskList.map(r => `<div style="color:var(--text-muted);margin-bottom:2px;">· <strong style="color:var(--text)">${escHtml(r.project)}</strong> — ${escHtml(r.milestone)} <span style="color:var(--red)">(scade ${r.end})</span></div>`).join('')}
+    <div style="font-weight:700;color:var(--yellow);margin-bottom:6px;">⚠️ ${atRiskList.length} stream a rischio</div>
+    ${atRiskList.map(r => `<div style="color:var(--text-muted);margin-bottom:2px;">· <strong style="color:var(--text)">${escHtml(r.project)}</strong> — ${escHtml(r.stream)} <span style="color:var(--red)">(scade ${r.end})</span></div>`).join('')}
   </div>` : '';
 
   chart.innerHTML = warningPanel + `
@@ -2036,6 +2719,7 @@ function renderGanttChart(data) {
       <div style="position:absolute;left:180px;right:0;top:0;bottom:0;overflow:hidden;pointer-events:none;z-index:0;">
         ${weekendBandsHtml}
         ${bgBandsHtml}
+        ${absenceBgBandsHtml}
       </div>
       ${rowsHtml}
     </div>
@@ -2050,19 +2734,25 @@ function getWeekNumber(d) {
   return Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
 }
 
-async function addGanttProject() {
+function toggleAddBgProject(btn) {
+  document.getElementById('gantt-bg-project-form').classList.toggle('open');
+}
+
+// Solo progetti "sfondo" (es. ferie) — i progetti normali si creano da soli
+// scrivendo una nota con cliente+progetto, v. _sync_project_client_from_note.
+async function addGanttProject(e) {
+  if (e) e.preventDefault();
   const name = normalizeProject(document.getElementById('gantt-proj-name').value);
   if (!name) return;
-  const is_background = document.getElementById('gantt-proj-background').checked;
   try {
     await apiFetch('/api/gantt/projects', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({name, color: ganttSelectedColor, is_background}),
+      body: JSON.stringify({name, color: ganttSelectedColor, is_background: true}),
     });
     document.getElementById('gantt-proj-name').value = '';
-    document.getElementById('gantt-proj-background').checked = false;
-    toast('Progetto aggiunto', 'success');
+    document.getElementById('gantt-bg-project-form').classList.remove('open');
+    toast('Progetto sfondo aggiunto', 'success');
     await loadGantt();
   } catch { toast('Errore', 'error'); }
 }
@@ -2070,27 +2760,27 @@ async function addGanttProject() {
 async function deleteGanttProject(id, e) {
   e.stopPropagation();
   try {
-    await fetch(`/api/gantt/projects/${id}`, {method:'DELETE'});
+    const res = await apiFetch(`/api/gantt/projects/${id}`, {method:'DELETE'});
+    if (!res.ok) throw new Error();
     toast('Progetto eliminato');
     await loadGantt();
   } catch { toast('Errore eliminazione', 'error'); }
 }
 
-function editMilestone(e, noteId, currentMsId, project) {
+function editNoteStream(e, noteId, currentStreamId, project) {
   e.stopPropagation();
   const existing = document.getElementById('ms-picker');
   if (existing) { const prev = existing._noteId; existing.remove(); if (prev === noteId) return; }
-  if (!project) { toast('Imposta prima un progetto sulla nota', 'info'); return; }
 
   const btn = e.currentTarget;
   const rect = btn.getBoundingClientRect();
   const picker = document.createElement('div');
   picker.id = 'ms-picker';
   picker._noteId = noteId;
-  picker.style.cssText = `position:fixed;top:${rect.bottom + 4}px;left:${rect.left}px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:4px;z-index:1000;min-width:200px;box-shadow:0 4px 20px rgba(0,0,0,0.35);`;
+  picker.style.cssText = `position:fixed;top:${rect.bottom + 4}px;left:${rect.left}px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:4px;z-index:1000;min-width:200px;max-height:280px;overflow-y:auto;box-shadow:0 4px 20px rgba(0,0,0,0.35);`;
   picker.innerHTML = `
-    <div style="padding:3px 8px 5px;font-size:0.62rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Collega a milestone</div>
-    <div class="ms-pick-item${!currentMsId?' ms-pick-active':''}" onclick="setNoteMilestone(${noteId},null)">— nessuna</div>
+    <div style="padding:3px 8px 5px;font-size:0.62rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Collega a stream</div>
+    <div class="ms-pick-item${!currentStreamId?' ms-pick-active':''}" onclick="setNoteStreamLink(${noteId},null)">— nessuno</div>
     <div id="ms-pick-body"><div style="padding:6px 10px;font-size:0.72rem;color:var(--text-muted);">Caricamento…</div></div>`;
   document.body.appendChild(picker);
 
@@ -2099,72 +2789,59 @@ function editMilestone(e, noteId, currentMsId, project) {
   };
   setTimeout(() => document.addEventListener('click', closeHandler), 0);
 
-  apiFetch(`/api/gantt/milestones/for-project?project=${encodeURIComponent(project)}`)
+  // Tutti gli Stream del contesto (non solo quelli del progetto della nota — la
+  // nota potrebbe non avere un campo "progetto" testuale valorizzato se è
+  // stata collegata direttamente tramite il campo "stream" alla creazione).
+  apiFetch('/api/gantt/streams/all')
     .then(r => r.json()).then(data => {
       const body = document.getElementById('ms-pick-body');
       if (!body) return;
-      if (!data.milestones.length) {
-        body.innerHTML = `<div style="padding:6px 10px;font-size:0.72rem;color:var(--text-muted);">Nessuna milestone per "${project}"</div>`;
+      if (!data.streams.length) {
+        body.innerHTML = `<div style="padding:6px 10px;font-size:0.72rem;color:var(--text-muted);">Nessuno stream disponibile</div>`;
         return;
       }
-      body.innerHTML = data.milestones.map(m =>
-        `<div class="ms-pick-item${m.id===currentMsId?' ms-pick-active':''}" onclick="setNoteMilestone(${noteId},${m.id})">🏁 ${escHtml(m.name)} <span style="opacity:0.5;font-size:0.68rem">→ ${m.end_date}</span></div>`
+      body.innerHTML = data.streams.map(s =>
+        `<div class="ms-pick-item${s.id===currentStreamId?' ms-pick-active':''}" onclick="setNoteStreamLink(${noteId},${s.id})">🏁 ${escHtml(s.label)}</div>`
       ).join('');
     });
 }
 
-async function setNoteMilestone(noteId, milestoneId) {
+async function setNoteStreamLink(noteId, streamId) {
   const picker = document.getElementById('ms-picker');
   if (picker) picker.remove();
   try {
     await apiFetch(`/api/notes/${noteId}`, {
       method: 'PATCH',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(milestoneId ? {milestone_id: milestoneId} : {clear_milestone: true})
+      body: JSON.stringify(streamId ? {milestone_id: streamId} : {clear_milestone: true})
     });
     await loadNotes();
-    toast(milestoneId ? 'Nota collegata alla milestone' : 'Milestone rimossa', 'success');
+    toast(streamId ? 'Nota collegata allo stream' : 'Stream rimosso', 'success');
   } catch { toast('Errore', 'error'); }
 }
 
-async function addMilestone(e, projectId) {
-  e.preventDefault();
-  const form = e.target;
-  const name = form.name.value.trim();
-  const start = form.start.value;
-  const end = form.end.value;
-  if (!name || !start || !end) return;
-  try {
-    await apiFetch('/api/gantt/milestones', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({project_id: projectId, name, start_date: start, end_date: end}),
-    });
-    form.reset();
-    form.classList.remove('open');
-    toast('Milestone aggiunta', 'success');
-    await loadGantt();
-  } catch { toast('Errore', 'error'); }
-}
-
-function editGanttMilestone(milestoneId) {
-  if (!ganttData) return;
-  let milestone = null;
+function _findStreamById(streamId) {
+  if (!ganttData) return null;
   for (const project of ganttData.projects) {
-    milestone = project.milestones.find(m => m.id === milestoneId);
-    if (milestone) break;
+    const s = (project.streams || []).find(s => s.id === streamId);
+    if (s) return s;
   }
-  if (!milestone) return;
+  return null;
+}
 
-  const item = document.querySelector(`.gantt-ms-item[data-mid="${milestoneId}"]`);
+function editGanttStream(streamId) {
+  const stream = _findStreamById(streamId);
+  if (!stream) return;
+
+  const item = document.querySelector(`.gantt-ms-item[data-mid="${streamId}"]`);
   if (!item || item.classList.contains('editing')) return;
   item.classList.add('editing');
   item.innerHTML = `
-    <form class="gantt-ms-edit-form" onsubmit="saveGanttMilestone(event,${milestoneId})">
-      <input class="gantt-input" name="name" value="${escHtml(milestone.name)}" maxlength="80" required>
+    <form class="gantt-ms-edit-form" onsubmit="saveGanttStream(event,${streamId})">
+      <input class="gantt-input" name="name" value="${escHtml(stream.name)}" maxlength="80" required>
       <div class="gantt-ms-edit-dates">
-        <input class="gantt-input" type="date" name="start" value="${milestone.start_date}" required>
-        <input class="gantt-input" type="date" name="end" value="${milestone.end_date}" required>
+        <input class="gantt-input" type="date" name="start" value="${stream.start_date || ''}">
+        <input class="gantt-input" type="date" name="end" value="${stream.end_date || ''}">
       </div>
       <div class="gantt-ms-edit-actions">
         <button type="submit" class="gantt-btn-sm">Salva</button>
@@ -2175,16 +2852,16 @@ function editGanttMilestone(milestoneId) {
   item.querySelector('input[name="start"]').focus();
 }
 
-async function saveGanttMilestone(e, milestoneId) {
+async function saveGanttStream(e, streamId) {
   e.preventDefault();
   e.stopPropagation();
   const form = e.target;
   const name = form.name.value.trim();
   const start = form.start.value;
   const end = form.end.value;
-  if (!name || !start || !end) return;
+  if (!name) return;
   try {
-    const res = await apiFetch(`/api/gantt/milestones/${milestoneId}`, {
+    const res = await apiFetch(`/api/gantt/streams/${streamId}`, {
       method: 'PATCH',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({name, start_date: start, end_date: end}),
@@ -2193,22 +2870,13 @@ async function saveGanttMilestone(e, milestoneId) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || 'Errore');
     }
-    toast('Milestone aggiornata', 'success');
+    toast('Stream aggiornato', 'success');
     await loadGantt();
     if (activeTab === 'due') await loadDueNotes();
     if (activeTab === 'focus') await loadFocus();
   } catch(err) {
-    toast(err.message || 'Errore aggiornamento milestone', 'error');
+    toast(err.message || 'Errore aggiornamento stream', 'error');
   }
-}
-
-async function deleteMilestone(id, e) {
-  e.stopPropagation();
-  try {
-    await fetch(`/api/gantt/milestones/${id}`, {method:'DELETE'});
-    toast('Milestone eliminata');
-    await loadGantt();
-  } catch { toast('Errore eliminazione', 'error'); }
 }
 
 // ── Dependencies ──────────────────────────────────────────────────────────────
@@ -2524,6 +3192,51 @@ async function openDocFolder() {
   } catch { toast('Impossibile aprire la cartella', 'error'); }
 }
 
+// ── Settings: API token ────────────────────────────────────────────────────────
+let _apiTokenValue = '';
+
+async function loadApiToken() {
+  try {
+    const r = await fetch('/api/settings/token');
+    const s = await r.json();
+    _apiTokenValue = s.token || '';
+    const inp = document.getElementById('api-token-input');
+    if (inp) inp.value = _apiTokenValue;
+  } catch {}
+}
+
+function toggleApiTokenVisibility() {
+  const inp = document.getElementById('api-token-input');
+  if (!inp) return;
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+}
+
+async function copyApiToken() {
+  if (!_apiTokenValue) return;
+  try {
+    await navigator.clipboard.writeText(_apiTokenValue);
+    toast('Token copiato', 'success');
+  } catch { toast('Impossibile copiare', 'error'); }
+}
+
+async function regenerateApiToken() {
+  const ok = await showConfirm(
+    'Rigenerare il token?',
+    'I dispositivi già configurati (telefono, altri browser) smetteranno di funzionare finché non inserisci di nuovo il nuovo token.',
+    'Rigenera'
+  );
+  if (!ok) return;
+  try {
+    const r = await fetch('/api/settings/token/regenerate', { method: 'POST' });
+    const s = await r.json();
+    _apiTokenValue = s.token || '';
+    const inp = document.getElementById('api-token-input');
+    if (inp) inp.value = _apiTokenValue;
+    localStorage.setItem(NOTED_TOKEN_KEY, _apiTokenValue);
+    toast('Token rigenerato', 'success');
+  } catch { toast('Errore', 'error'); }
+}
+
 // ── Update check ─────────────────────────────────────────────────────────────
 async function checkForUpdate() {
   try {
@@ -2567,6 +3280,7 @@ resetRefresh();
 _loadLocalIp();
 loadDocRoot();
 loadOllamaSettings();
+loadStreamDatalist();
 checkForUpdate();
 
 // ── Voice input ───────────────────────────────────────────────────────────────
@@ -2873,7 +3587,7 @@ function _renderAnalysisResults(result) {
   if (_analysisItems.length) {
     itemsEl.innerHTML = _analysisItems.map((item, i) => {
       const isNote = item.type === 'note';
-      const typeLabel = isNote ? '📝 Nota / Todo' : '📊 Milestone';
+      const typeLabel = isNote ? '📝 Nota / Todo' : '📊 Stream';
       const meta = [];
       if (item.project) meta.push(`<span class="project-badge">${escHtml(item.project)}</span>`);
       if (isNote) {
@@ -2960,8 +3674,8 @@ async function createDocItems() {
 
   if (milestones.length) {
     const names = milestones.map(m => `• ${m.name} (${m.project})`).join('\n');
-    toast(`${milestones.length} milestone da creare manualmente nel Gantt:\n${names}`, '');
-    console.info('Milestone suggerite:', milestones);
+    toast(`${milestones.length} stream da creare manualmente nel Gantt:\n${names}`, '');
+    console.info('Stream suggeriti:', milestones);
   }
 
   if (skipped) toast(`${skipped} element${skipped > 1 ? 'i' : 'o'} non creato per errore`, 'error');
@@ -3057,7 +3771,7 @@ function _editorPreview() {
   const preview = document.getElementById('editor-preview');
   if (!ta || !preview) return;
   preview.innerHTML = typeof marked !== 'undefined'
-    ? marked.parse(ta.value || '')
+    ? renderMarkdown(ta.value || '')
     : '<em>marked.js non caricato</em>';
 }
 

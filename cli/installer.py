@@ -1,6 +1,5 @@
 """Logica di installazione/rimozione del servizio per Mac, Linux, Windows."""
 import sys
-import os
 import subprocess
 from pathlib import Path
 
@@ -27,15 +26,17 @@ LAUNCHD_PLIST = Path.home() / "Library" / "LaunchAgents" / f"{LAUNCHD_LABEL}.pli
 
 
 def _mac_env_vars() -> str:
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
-    api_key_entry = f"""
-        <key>ANTHROPIC_API_KEY</key>
-        <string>{api_key}</string>""" if api_key else ""
-    return f"""
+    # Secrets (ANTHROPIC_API_KEY, NOTED_API_TOKEN, ...) are deliberately NOT
+    # embedded here in plaintext: cli/main.py loads .env from the repo root
+    # via an absolute path (Path(__file__).parent.parent / ".env") on every
+    # invocation, LaunchAgent included, so there's nothing to duplicate here
+    # — and duplicating it would mean two places to keep in sync and two
+    # places a secret can leak from.
+    return """
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>{api_key_entry}
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>"""
 
 
@@ -138,8 +139,7 @@ SYSTEMD_UNIT = Path.home() / ".config" / "systemd" / "user" / "noted.service"
 
 def install_linux(port: int) -> None:
     from db.paths import log_path
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
-    env_line = f"Environment=ANTHROPIC_API_KEY={api_key}" if api_key else ""
+    # Secrets are not embedded here — see the comment in _mac_env_vars().
     unit = f"""[Unit]
 Description=noted — appunti giornalieri
 After=network.target
@@ -148,7 +148,6 @@ After=network.target
 ExecStart={_noted_cmd()} web --host 0.0.0.0 --port {port}
 Restart=on-failure
 RestartSec=5
-{env_line}
 StandardOutput=append:{log_path()}
 StandardError=append:{log_path()}
 

@@ -10,12 +10,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from db import crud
 from db.engine import get_session, init_db
+from web.auth import token_auth_middleware
 from web.deps import get_ctx, templates
 from web.routers import backup, contexts, docs, editor, gantt, notes, recaps, settings, voice, ollama, version
 from web.services.scheduler_service import lifespan
 
 
 app = FastAPI(title="noted dashboard", lifespan=lifespan)
+app.middleware("http")(token_auth_middleware)
 
 
 @app.on_event("startup")

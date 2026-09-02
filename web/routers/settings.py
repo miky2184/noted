@@ -15,6 +15,18 @@ async def api_get_settings():
     return {"doc_root": get_doc_root()}
 
 
+@router.get("/api/settings/token")
+async def api_get_token():
+    from db.config import get_api_token
+    return {"token": get_api_token()}
+
+
+@router.post("/api/settings/token/regenerate")
+async def api_regenerate_token():
+    from db.config import regenerate_api_token
+    return {"token": regenerate_api_token()}
+
+
 @router.get("/api/settings/favorite-ctx")
 async def api_get_favorite_ctx():
     from db.config import get_favorite_ctx

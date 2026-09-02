@@ -29,6 +29,7 @@ from rich import print as rprint
 
 from db.engine import init_db, get_session
 from db import crud
+from db.models import PRIORITIES, STATUSES
 
 app = typer.Typer(
     name="noted",
@@ -45,22 +46,46 @@ def _init():
 # ── ADD ────────────────────────────────────────────────────────────────────────
 
 PRIORITY_COLORS = {"high": "red", "medium": "yellow", "low": "green"}
-STATUS_ICONS = {"backlog": "🗂", "todo": "⬜", "wip": "🔄", "waiting": "⏳", "blocked": "🚫", "done": "✅"}
-STATUS_COLORS = {"backlog": "dim", "todo": "blue", "wip": "yellow", "waiting": "magenta", "blocked": "red", "done": "green"}
+STATUS_ICONS = {"backlog": "🗂", "todo": "⬜", "discuss": "💬", "wip": "🔄", "waiting": "⏳", "blocked": "🚫", "done": "✅"}
+STATUS_COLORS = {"backlog": "dim", "todo": "blue", "discuss": "cyan", "wip": "yellow", "waiting": "magenta", "blocked": "red", "done": "green"}
+
+_PRIORITY_HELP = " | ".join(PRIORITIES)
+_STATUS_HELP = " | ".join(STATUSES)
+
+
+def _validate_priority(priority: Optional[str]) -> None:
+    if priority and priority not in PRIORITIES:
+        console.print(f"[red]Priorità non valida. Usa: {' | '.join(PRIORITIES)}[/red]")
+        raise typer.Exit(1)
+
+
+def _validate_status(status: Optional[str]) -> None:
+    if status and status not in STATUSES:
+        console.print(f"[red]Stato non valido. Usa: {' | '.join(STATUSES)}[/red]")
+        raise typer.Exit(1)
 
 @app.command()
 def add(
     content: str = typer.Argument(..., help="Testo della nota"),
     tag: str = typer.Option("", "--tag", "-t", help="Tag (comma-separated): 'airflow,bigquery'"),
+    cliente: Optional[str] = typer.Option(None, "--cliente", help="Cliente: 'credem', 'deutsche-bank'"),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Progetto: 'finops', 'deutsche-bank'"),
-    priority: str = typer.Option("medium", "--priority", "-P", help="Priorità: low | medium | high"),
+    priority: str = typer.Option("medium", "--priority", "-P", help=f"Priorità: {_PRIORITY_HELP}"),
+    start: Optional[str] = typer.Option(None, "--start", help="Data inizio: YYYY-MM-DD"),
     due: Optional[str] = typer.Option(None, "--due", "-d", help="Scadenza: YYYY-MM-DD"),
-    status: Optional[str] = typer.Option(None, "--status", "-s", help="Stato: backlog | todo | wip | waiting | blocked | done"),
+    status: Optional[str] = typer.Option(None, "--status", "-s", help=f"Stato: {_STATUS_HELP}"),
     assignee: Optional[str] = typer.Option(None, "--assignee", "-a", help="Assegna a: 'mario' o '@mario'"),
     ctx: str = typer.Option("default", "--ctx", "-c", help="Contesto (default: default)"),
 ):
     """Aggiungi una nota."""
     _init()
+    start_date = None
+    if start:
+        try:
+            start_date = date.fromisoformat(start)
+        except ValueError:
+            console.print("[red]Formato data non valido. Usa YYYY-MM-DD[/red]")
+            raise typer.Exit(1)
     due_date = None
     if due:
         try:
@@ -68,23 +93,22 @@ def add(
         except ValueError:
             console.print("[red]Formato data non valido. Usa YYYY-MM-DD[/red]")
             raise typer.Exit(1)
-    if priority not in ("low", "medium", "high"):
-        console.print("[red]Priorità non valida. Usa: low | medium | high[/red]")
-        raise typer.Exit(1)
-    if status and status not in ("backlog", "todo", "wip", "waiting", "blocked", "done"):
-        console.print("[red]Stato non valido. Usa: backlog | todo | wip | waiting | blocked | done[/red]")
-        raise typer.Exit(1)
+    _validate_priority(priority)
+    _validate_status(status)
     if assignee:
         assignee = assignee.lstrip("@")
     with get_session() as session:
-        note = crud.add_note(session, content=content, tags=tag, project=project, priority=priority, due_date=due_date, status=status, assignee=assignee, ctx=ctx)
+        note = crud.add_note(session, content=content, tags=tag, cliente=cliente, project=project,
+                              priority=priority, start_date=start_date, due_date=due_date,
+                              status=status, assignee=assignee, ctx=ctx)
     color = PRIORITY_COLORS[note.priority]
+    cliente_str = f" 🏢{note.cliente}" if note.cliente else ""
     proj_str = f" [{note.project}]" if note.project else ""
     tag_str = f" #{note.tags}" if note.tags else ""
     due_str = f" 📅 {note.due_date}" if note.due_date else ""
     status_str = f" {STATUS_ICONS.get(note.status, '')} {note.status}" if note.status else ""
     assignee_str = f" @{note.assignee}" if note.assignee else ""
-    console.print(f"✅ [green]Nota #{note.id} salvata[/green]{proj_str}{tag_str} [{color}]{note.priority}[/{color}]{due_str}{status_str}{assignee_str}")
+    console.print(f"✅ [green]Nota #{note.id} salvata[/green]{cliente_str}{proj_str}{tag_str} [{color}]{note.priority}[/{color}]{due_str}{status_str}{assignee_str}")
 
 
 # ── LIST ───────────────────────────────────────────────────────────────────────
@@ -95,7 +119,7 @@ def list_notes(
     tag: Optional[str] = typer.Option(None, "--tag", "-t", help="Filtra per tag"),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Filtra per progetto"),
     assignee: Optional[str] = typer.Option(None, "--assignee", "-a", help="Filtra per assegnatario"),
-    status: Optional[str] = typer.Option(None, "--status", "-s", help="Filtra per stato: backlog | todo | wip | waiting | blocked | done"),
+    status: Optional[str] = typer.Option(None, "--status", "-s", help=f"Filtra per stato: {_STATUS_HELP}"),
     limit: int = typer.Option(20, "--limit", "-n", help="Numero massimo di note"),
     date_str: Optional[str] = typer.Option(None, "--date", "-d", help="Data specifica: YYYY-MM-DD"),
     ctx: str = typer.Option("default", "--ctx", "-c", help="Contesto (default: default)"),
@@ -113,9 +137,7 @@ def list_notes(
             console.print("[red]Formato data non valido. Usa YYYY-MM-DD[/red]")
             raise typer.Exit(1)
 
-    if status and status not in ("backlog", "todo", "wip", "waiting", "blocked", "done"):
-        console.print("[red]Stato non valido. Usa: backlog | todo | wip | waiting | blocked | done[/red]")
-        raise typer.Exit(1)
+    _validate_status(status)
 
     with get_session() as session:
         notes = crud.get_notes(session, day=target_date, tag=tag, project=project, assignee=assignee, status=status, ctx=ctx, limit=limit)
@@ -181,21 +203,17 @@ def delete(
 def edit(
     note_id: int = typer.Argument(..., help="ID della nota da modificare"),
     content: Optional[str] = typer.Argument(None, help="Nuovo testo della nota"),
-    priority: Optional[str] = typer.Option(None, "--priority", "-P", help="Nuova priorità: low | medium | high"),
+    priority: Optional[str] = typer.Option(None, "--priority", "-P", help=f"Nuova priorità: {_PRIORITY_HELP}"),
     due: Optional[str] = typer.Option(None, "--due", "-d", help="Nuova scadenza: YYYY-MM-DD"),
     clear_due: bool = typer.Option(False, "--clear-due", help="Rimuovi la scadenza"),
-    status: Optional[str] = typer.Option(None, "--status", "-s", help="Stato: backlog | todo | wip | waiting | blocked | done"),
+    status: Optional[str] = typer.Option(None, "--status", "-s", help=f"Stato: {_STATUS_HELP}"),
     clear_status: bool = typer.Option(False, "--clear-status", help="Rimuovi lo stato"),
     assignee: Optional[str] = typer.Option(None, "--assignee", "-a", help="Assegna a: 'mario' o '@mario'"),
 ):
     """Modifica una nota esistente."""
     _init()
-    if priority and priority not in ("low", "medium", "high"):
-        console.print("[red]Priorità non valida. Usa: low | medium | high[/red]")
-        raise typer.Exit(1)
-    if status and status not in ("backlog", "todo", "wip", "waiting", "blocked", "done"):
-        console.print("[red]Stato non valido. Usa: backlog | todo | wip | waiting | blocked | done[/red]")
-        raise typer.Exit(1)
+    _validate_priority(priority)
+    _validate_status(status)
     due_date = None
     if due:
         try:
@@ -346,10 +364,11 @@ def web(
 ):
     """Avvia la dashboard web."""
     _init()
-    from db.config import get_port
+    from db.config import get_api_token, get_port
     from db.paths import cert_path, key_path
     if port is None:
         port = get_port()
+    console.print(f"🔑 Token API (richiesto da un nuovo dispositivo): [cyan]{get_api_token()}[/cyan]")
     try:
         import uvicorn
         from web.app import app as web_app
@@ -466,6 +485,21 @@ def show_model():
     current = get_model()
     label = next((k for k, v in MODELS.items() if v == current), current)
     console.print(f"🤖 Modello attivo: [cyan]{label}[/cyan] ({current})")
+
+
+@app.command()
+def token(
+    regenerate: bool = typer.Option(False, "--regenerate", help="Genera un nuovo token (invalida i dispositivi già configurati)"),
+):
+    """Mostra (o rigenera) il token richiesto dalle chiamate API della dashboard."""
+    from db.config import get_api_token, regenerate_api_token
+    if regenerate:
+        t = regenerate_api_token()
+        console.print("🔄 Token rigenerato — i dispositivi già configurati dovranno reinserirlo.")
+    else:
+        t = get_api_token()
+    console.print(f"🔑 Token API: [cyan]{t}[/cyan]")
+    console.print("[dim]Incollalo quando la dashboard te lo chiede al primo accesso da un nuovo dispositivo.[/dim]")
 
 
 # ── INSTALL / UNINSTALL ────────────────────────────────────────────────────────

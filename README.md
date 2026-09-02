@@ -128,6 +128,32 @@ noted web --port 8080
 
 ---
 
+## Token di accesso
+
+`noted` è pensato per un solo utente ma può essere raggiunto da altri dispositivi
+sulla stessa rete (es. il telefono, per l'input vocale). Per questo ogni chiamata
+API richiede un token condiviso nell'header `X-Noted-Token` — senza non è
+possibile leggere, modificare o esportare/ripristinare i dati tramite l'API.
+
+Il token viene generato automaticamente al primo avvio e resta invariato tra i
+riavvii (sovrascrivibile con la variabile d'ambiente `NOTED_API_TOKEN`).
+
+```bash
+noted token                # mostra il token attuale
+noted token --regenerate   # ne genera uno nuovo (invalida i dispositivi già configurati)
+```
+
+Al primo accesso da un browser, `noted` chiede il token una sola volta e lo
+salva in `localStorage`: le richieste successive lo includono automaticamente.
+Per collegare un nuovo dispositivo, copia il token da **Impostazioni → 🔑 Accesso**
+su un dispositivo già configurato (o da `noted token`) e incollalo quando richiesto.
+
+> La pagina iniziale (`/`) resta raggiungibile senza token — solo le chiamate
+> API sono protette. Se esponi noted oltre alla tua LAN personale, valuta
+> comunque un livello di protezione aggiuntivo (VPN, reverse proxy con auth).
+
+---
+
 ## Dove vengono salvati i dati
 
 | Piattaforma | Dati | Configurazione |
@@ -181,10 +207,10 @@ Ogni contesto è un database logico separato — note, recap e Gantt non si mesc
 ### Tab Oggi
 
 - Aggiunta rapida con `Enter` (a capo con `Shift+Enter`)
-- Campi: `#tag`, progetto, `@persona`, scadenza, stato, priorità
+- Campi: `#tag`, cliente, progetto, `@persona`, data inizio, scadenza, stato, priorità
 - **Tag**: separati da `,` `|` `;` — normalizzati automaticamente in camelCase (`flusso acquiring` → `flussoAcquiring`)
-- **Progetti**: sempre in UPPERCASE
-- Modifica inline di contenuto, tag, progetto, assegnatario e scadenza direttamente sulla nota
+- **Cliente** e **Progetto**: sempre in UPPERCASE. Il cliente è il collegamento con il Gantt (vedi sotto) — scrivendo una nota con cliente+progetto, il progetto compare automaticamente nel Gantt sotto quel cliente, senza nessun passaggio manuale
+- Modifica inline di contenuto, tag, cliente, progetto, assegnatario, data inizio e scadenza direttamente sulla nota
 - Navigazione tra giorni con le frecce `‹ ›`
 
 ### Tab Oggi — Input vocale
@@ -213,15 +239,21 @@ Note con `due_date` impostata raggruppate in: ⚠️ Scadute · 🔴 Oggi · �
 
 ### Tab Gantt
 
-Timeline visiva per pianificare progetti:
+Timeline visiva per pianificare progetti, organizzata sulla gerarchia **Cliente → Progetto → Stream → Fase → Nota**:
 
-- **Progetti** con colore personalizzabile (10 palette predefinite)
-- **Milestone** con date di inizio/fine — barre colorate sulla timeline; all'aggiunta viene creata automaticamente una nota con `tag=milestone`, `status=todo`, `due=end_date`
-- **Note con scadenza** appaiono come ◆ sulla riga del progetto; tooltip con contenuto, data, assegnatario; click → vai alla nota
-- **Progetti sfondo** (flag "Usa come sfondo") — visualizzati come bande colorate a tutta altezza (es. ferie, sprint, freeze)
-- **Avvisi at-risk** 🔴 su milestone con `end_date ≤ oggi+7gg` e note in stato `blocked`, `waiting` o `backlog`
+- **Clienti e Progetti si popolano da soli**: non si creano a mano nel Gantt. Scrivi una nota con i campi `cliente` + `progetto` (es. cliente `CREDEM`, progetto `FINOPS`) e — se il progetto non esiste ancora — viene creato automaticamente e collegato a quel cliente. I progetti si organizzano visivamente sotto l'header del cliente nella sidebar (progetti senza cliente restano in fondo, in "Senza cliente")
+- **Progetti** con colore assegnato automaticamente (deducibile anche a mano dalla sidebar) — nella sidebar ogni progetto è **collassato di default** (solo pallino, nome, %): un click lo espande per gestire fasi/stream, un solo progetto aperto alla volta
+- **Assenze** — sezione dedicata (collassabile) per registrare ferie/malattie tue o di collaboratori: nome persona + periodo, nessuna data obbligatoria oltre a quella; ogni persona ha una banda colorata distinta sulla timeline (indipendente da clienti/progetti), utile per vedere a colpo d'occhio chi non sarà disponibile rispetto alle scadenze
+- **Stream** — un filone di lavoro dentro un progetto (es. "Collection"), puro contenitore organizzativo di Fasi
+- **Fasi** (`Milestone`) — possono stare direttamente sul progetto o dentro uno Stream; le date sono **opzionali**: una fase è creabile subito senza date come contenitore di note, e comparirà come barra sulla timeline solo quando entrambe le date sono impostate. Ogni fase raccoglie N note (badge `🏁 fase#N` sulla card, click per collegare/scollegare) e ne calcola la % di completamento (note `done` / note totali). Progress aggregato: Fase → Stream → Progetto, visibile sia in sidebar sia sulla riga del progetto nel chart
+- **Collegamento rapido**: nel form di creazione nota, il campo "fase" propone tutte le fasi esistenti con etichetta completa (`Progetto > [Stream >] Fase`) — niente bisogno di collegarla dopo
+- **Note con scadenza** (senza fase) appaiono come ◆ sulla riga del progetto; tooltip con contenuto, data, assegnatario; click → vai alla nota
+- **Progetti sfondo** (flag "Usa come sfondo") — visualizzati come bande colorate a tutta altezza (es. ferie, sprint, freeze); non hanno mai una sezione Stream, e la fase auto-creata alla scadenza non viene generata
+- **Avvisi at-risk** 🔴 su fasi con `end_date ≤ oggi+7gg` e note in stato `blocked`, `waiting` o `backlog`
 - **Zoom**: Giorno · Settimana · Mese · Auto (adattivo all'arco temporale)
 - Linea verticale "oggi" sempre visibile
+
+Eliminare un Cliente, un Progetto, uno Stream o una Fase non cancella mai le note collegate: vengono solo scollegate (il riferimento torna a "nessuno").
 
 ### Recap AI
 
@@ -376,10 +408,12 @@ noted add "task su progetto secondario" --ctx home
 | Opzione | Descrizione |
 |---------|-------------|
 | `--tag` / `-t` | Tag separati da virgola: `airflow,bigquery` |
+| `--cliente` | Cliente (salvato in UPPERCASE) — se combinato con `--project` crea/collega automaticamente il progetto nel Gantt |
 | `--project` / `-p` | Progetto (salvato in UPPERCASE) |
 | `--priority` / `-P` | `low` \| `medium` (default) \| `high` |
+| `--start` | Data inizio: `YYYY-MM-DD` |
 | `--due` / `-d` | Scadenza: `YYYY-MM-DD` |
-| `--status` / `-s` | `backlog` \| `todo` \| `wip` \| `waiting` \| `blocked` \| `done` |
+| `--status` / `-s` | `backlog` \| `todo` \| `discuss` \| `wip` \| `waiting` \| `blocked` \| `done` |
 | `--assignee` / `-a` | Assegnatario |
 | `--ctx` / `-c` | Contesto (default: `default`) |
 
@@ -470,7 +504,7 @@ noted/
 │   ├── main.py          # Typer CLI
 │   └── installer.py     # install/uninstall (Mac/Linux/Windows)
 ├── db/
-│   ├── models.py        # SQLModel — Note, Recap, GanttProject, Milestone, Context
+│   ├── models.py        # SQLModel — Note, Recap, Client, GanttProject, Stream, Milestone, Absence, Context
 │   ├── engine.py        # connessione DB + migration automatica
 │   ├── crud.py          # operazioni CRUD (filtrate per context)
 │   ├── config.py        # configurazione (modello AI, porta)

@@ -11,18 +11,40 @@ from db import crud
 from db.engine import get_session
 from db.models import Document
 from web.deps import doc_dict, get_ctx
-from web.services.document_service import DEPTH_LIMITS, MAX_DOCS, MAX_IMAGE_BYTES, extract_text, open_path
+from web.services.document_service import (
+    DEPTH_LIMITS, MAX_DOCS, MAX_IMAGE_BYTES, MAX_UPLOAD_BYTES, extract_text, open_path,
+)
 
 
 router = APIRouter()
 
 
+def _safe_doc_path(doc_root: Path, rel_path: str) -> Path:
+    """Resolve a Document.rel_path under doc_root, refusing anything that
+    escapes it (``../..``, absolute paths, symlink tricks, …).
+
+    Used by every endpoint that opens/serves/deletes a document on disk —
+    keep this as the single place that decides a path is safe.
+    """
+    fp = (doc_root / rel_path).resolve()
+    try:
+        fp.relative_to(doc_root.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Percorso non valido")
+    return fp
+
+
 # ── Documents ─────────────────────────────────────────────────────────────────
 
 @router.post("/api/notes/{note_id}/docs", status_code=201)
-async def api_upload_doc(note_id: int, file: UploadFile = File(...)):
+async def api_upload_doc(note_id: int, request: Request, file: UploadFile = File(...)):
     import hashlib, mimetypes, re
     from db.config import get_doc_root
+
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413,
+            detail=f"File troppo grande (max {MAX_UPLOAD_BYTES // 1_048_576} MB)")
 
     with get_session() as session:
         note = session.get(crud.Note, note_id)
@@ -43,6 +65,9 @@ async def api_upload_doc(note_id: int, file: UploadFile = File(...)):
     dest_dir.mkdir(parents=True, exist_ok=True)
 
     content = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413,
+            detail=f"File troppo grande (max {MAX_UPLOAD_BYTES // 1_048_576} MB)")
     sha256 = hashlib.sha256(content).hexdigest()
 
     dest_name = f"{today_str}_{safe_name}"
@@ -80,20 +105,19 @@ async def api_delete_doc(doc_id: int, remove_file: bool = False):
     if not doc:
         raise HTTPException(status_code=404)
     if remove_file:
-        fp = Path(get_doc_root()).expanduser() / doc.rel_path
+        fp = _safe_doc_path(Path(get_doc_root()).expanduser(), doc.rel_path)
         if fp.is_file():
             fp.unlink()
 
 
 @router.post("/api/docs/{doc_id}/open")
 async def api_open_doc(doc_id: int):
-    import subprocess
     from db.config import get_doc_root
     with get_session() as session:
         doc = session.get(Document, doc_id)
     if not doc:
         raise HTTPException(status_code=404)
-    fp = Path(get_doc_root()).expanduser() / doc.rel_path
+    fp = _safe_doc_path(Path(get_doc_root()).expanduser(), doc.rel_path)
     if not fp.is_file():
         raise HTTPException(status_code=404, detail="File non trovato sul disco")
     open_path(fp)
@@ -107,7 +131,7 @@ async def api_open_doc_folder(doc_id: int):
         doc = session.get(Document, doc_id)
     if not doc:
         raise HTTPException(status_code=404)
-    folder = (Path(get_doc_root()).expanduser() / doc.rel_path).parent
+    folder = _safe_doc_path(Path(get_doc_root()).expanduser(), doc.rel_path).parent
     folder.mkdir(parents=True, exist_ok=True)
     open_path(folder)
     return {"ok": True}
@@ -130,12 +154,7 @@ async def api_serve_doc(doc_id: int):
         doc = session.get(Document, doc_id)
     if not doc:
         raise HTTPException(status_code=404)
-    doc_root = Path(get_doc_root()).expanduser()
-    fp = doc_root / doc.rel_path
-    try:
-        fp.relative_to(doc_root)  # path traversal check
-    except ValueError:
-        raise HTTPException(status_code=403)
+    fp = _safe_doc_path(Path(get_doc_root()).expanduser(), doc.rel_path)
     if not fp.is_file():
         raise HTTPException(status_code=404, detail="File non trovato")
     return FileResponse(str(fp), filename=doc.orig_name,
@@ -226,7 +245,10 @@ async def api_analyze_docs(request: Request, body: AnalyzeDocsRequest):
     total_chars = 0
 
     for doc in docs:
-        fp = doc_root / doc.rel_path
+        try:
+            fp = _safe_doc_path(doc_root, doc.rel_path)
+        except HTTPException:
+            continue
         if not fp.is_file():
             continue
         text, mode = extract_text(fp, doc.mime_type, chars_limit=max_chars_per_doc)

@@ -17,8 +17,10 @@ class Note(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     content: str
     tags: str = Field(default="")
+    cliente: Optional[str] = Field(default=None, index=True)
     project: Optional[str] = None
     priority: str = Field(default="medium")
+    start_date: Optional[date] = None
     due_date: Optional[date] = None
     status: Optional[str] = Field(default=None, index=True)
     assignee: Optional[str] = None
@@ -26,7 +28,16 @@ class Note(SQLModel, table=True):
     sort_order: int = Field(default=0)
     created_at: datetime = Field(default_factory=datetime.now, index=True)
     updated_at: datetime = Field(default_factory=datetime.now)
-    milestone_id: Optional[int] = Field(default=None, foreign_key="milestone.id")
+    # Nome legacy: la tabella/concetto "Milestone" è stata rinominata "Stream" (v. Stream),
+    # ma questa colonna mantiene il nome fisico originale per evitare di toccare la tabella
+    # note via Alembic batch mode, che ricrea la tabella e con essa i trigger FTS5.
+    milestone_id: Optional[int] = Field(default=None, foreign_key="stream.id")
+    # Bozza email generata dall'AI a partire da questa nota — salvata così un
+    # secondo clic sul pulsante ✉️ mostra la bozza esistente invece di
+    # richiamare l'AI da capo (che resta usata solo per generarla la prima
+    # volta o per applicare una richiesta di modifica).
+    email_subject: Optional[str] = None
+    email_body: Optional[str] = None
 
     def tags_list(self) -> list[str]:
         return [t.strip() for t in self.tags.split(",") if t.strip()]
@@ -41,6 +52,26 @@ class Recap(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.now)
 
 
+class Client(SQLModel, table=True):
+    """Cliente di consulenza — raggruppa uno o più GanttProject."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    context: str = Field(default="default", index=True)
+    created_at: datetime = Field(default_factory=datetime.now)
+
+
+class Absence(SQLModel, table=True):
+    """Assenza (ferie, malattia, ...) di una persona — banda sulla timeline,
+    indipendente da Cliente/Progetto."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    person: str
+    start_date: date
+    end_date: date
+    color: Optional[str] = None
+    context: str = Field(default="default", index=True)
+    created_at: datetime = Field(default_factory=datetime.now)
+
+
 class GanttProject(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
@@ -48,15 +79,21 @@ class GanttProject(SQLModel, table=True):
     context: str = Field(default="default")
     is_background: bool = Field(default=False)
     archived: bool = Field(default=False)
+    client_id: Optional[int] = Field(default=None, foreign_key="client.id", index=True)
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
     created_at: datetime = Field(default_factory=datetime.now)
 
 
-class Milestone(SQLModel, table=True):
+class Stream(SQLModel, table=True):
+    """Uno "Stream" di lavoro dentro un GanttProject: nome + date opzionali (appare come
+    barra sulla timeline solo se entrambe le date sono valorizzate). Raggruppa N Note e ne
+    calcola il progress. Diretto figlio del progetto — nessuna nidificazione ulteriore."""
     id: Optional[int] = Field(default=None, primary_key=True)
     project_id: int = Field(foreign_key="ganttproject.id")
     name: str
-    start_date: date
-    end_date: date
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
     note_id: Optional[int] = Field(default=None, foreign_key="note.id")
     created_at: datetime = Field(default_factory=datetime.now)
 

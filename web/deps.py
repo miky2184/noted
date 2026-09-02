@@ -12,12 +12,16 @@ def note_dict(n):
         "id": n.id,
         "content": n.content,
         "tags": n.tags_list(),
+        "cliente": n.cliente,
         "project": n.project,
         "priority": n.priority,
+        "start_date": str(n.start_date) if n.start_date else None,
         "due_date": str(n.due_date) if n.due_date else None,
         "status": n.status,
         "assignee": n.assignee,
         "milestone_id": n.milestone_id,
+        "email_subject": n.email_subject,
+        "email_body": n.email_body,
         "created_at": n.created_at.isoformat(),
     }
 

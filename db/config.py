@@ -104,6 +104,48 @@ def set_favorite_ctx(name: str) -> None:
     _save(data)
 
 
+def get_api_token() -> str:
+    """Shared secret required by every /api/* request (see web/auth.py).
+
+    Override with the NOTED_API_TOKEN env var (e.g. for tests or advanced
+    setups); otherwise a token is generated once and persisted in the app
+    config so it survives restarts.
+    """
+    import os
+    env_token = os.environ.get("NOTED_API_TOKEN")
+    if env_token:
+        return env_token.strip()
+    data = _load()
+    token = data.get("api_token")
+    if not token:
+        token = _new_token()
+        data["api_token"] = token
+        _save(data)
+    return token
+
+
+def regenerate_api_token() -> str:
+    """Rotate the API token — invalidates every device currently paired.
+
+    A no-op when NOTED_API_TOKEN is set: the env var always wins in
+    get_api_token(), so persisting a new random token here would be silently
+    ignored and would only mislead whoever reads the "regenerated" value.
+    """
+    import os
+    if os.environ.get("NOTED_API_TOKEN"):
+        return get_api_token()
+    data = _load()
+    token = _new_token()
+    data["api_token"] = token
+    _save(data)
+    return token
+
+
+def _new_token() -> str:
+    import secrets
+    return secrets.token_urlsafe(32)
+
+
 def set_schedule(time_str: str | None, days: list[int] | None, recap_type: str = "daily") -> None:
     data = _load()
     if time_str is None:

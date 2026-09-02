@@ -5,6 +5,7 @@ import sys
 
 MAX_DOCS = 5
 MAX_IMAGE_BYTES = 1_048_576  # 1 MB per immagine
+MAX_UPLOAD_BYTES = 50 * 1_048_576  # 50 MB per file caricato
 
 DEPTH_LIMITS = {
     "low": {"chars_per_doc": 2_000, "total_chars": 6_000, "max_tokens": 512},

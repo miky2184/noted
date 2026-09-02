@@ -27,21 +27,21 @@ def _format_notes(notes: list[Note]) -> str:
 
 def _format_gantt(gantt: dict | None, today: date) -> str:
     """Serializza i dati Gantt in testo leggibile dal modello.
-    Include solo milestone non ancora concluse (end_date >= oggi - 7gg).
+    Include solo gli Stream datati non ancora conclusi (end_date >= oggi - 7gg).
     """
     if not gantt or not gantt.get("projects"):
         return ""
     cutoff = (today - timedelta(days=7)).isoformat()
     lines = []
     for p in gantt["projects"]:
-        active = [m for m in p["milestones"] if m["end_date"] >= cutoff]
+        active = [s for s in p["streams"] if s["end_date"] and s["end_date"] >= cutoff]
         if not active:
             continue
-        for m in active:
-            lines.append(f"- [{p['name']}] {m['name']}: {m['start_date']} → {m['end_date']}")
+        for s in active:
+            lines.append(f"- [{p['name']}] {s['name']}: {s['start_date']} → {s['end_date']}")
     if not lines:
         return ""
-    return "\n## Milestone Gantt attive\n" + "\n".join(lines)
+    return "\n## Stream Gantt attivi\n" + "\n".join(lines)
 
 
 DAILY_PROMPT = """Sei un assistente che aiuta un professionista IT a fare il recap delle proprie note di lavoro.

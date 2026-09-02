@@ -1,8 +1,8 @@
 from datetime import date, datetime, timedelta
 from typing import Optional
 from sqlmodel import Session, select
-from sqlalchemy import or_, delete as sa_delete, text
-from db.models import Note, Recap, GanttProject, Milestone, Context, NoteDependency, Document
+from sqlalchemy import or_, and_, delete as sa_delete, update as sa_update, text
+from db.models import Note, Recap, GanttProject, Context, NoteDependency, Document, Client, Stream, Absence
 
 
 # ── Context ────────────────────────────────────────────────────────────────────
@@ -40,12 +40,12 @@ def delete_context(session: Session, ctx_id: int) -> bool:
     if not ctx or ctx.name == "default":
         return False
     ctx_name = ctx.name
-    # Cascade: delete milestones → gantt projects → recaps → notes
+    # Cascade: delete streams → gantt projects → recaps → notes
     project_ids = session.exec(
         select(GanttProject.id).where(GanttProject.context == ctx_name)
     ).all()
     if project_ids:
-        session.exec(sa_delete(Milestone).where(Milestone.project_id.in_(project_ids)))
+        session.exec(sa_delete(Stream).where(Stream.project_id.in_(project_ids)))
     session.exec(sa_delete(GanttProject).where(GanttProject.context == ctx_name))
     session.exec(sa_delete(Recap).where(Recap.context == ctx_name))
     session.exec(sa_delete(Note).where(Note.context == ctx_name))
@@ -56,21 +56,68 @@ def delete_context(session: Session, ctx_id: int) -> bool:
 
 # ── Notes ──────────────────────────────────────────────────────────────────────
 
+_GANTT_COLORS = ["#818cf8", "#60a5fa", "#34d399", "#fbbf24", "#f87171",
+                  "#a78bfa", "#fb923c", "#2dd4bf", "#f472b6", "#a3e635"]
+
+
+def _color_for(name: str) -> str:
+    return _GANTT_COLORS[sum(ord(c) for c in name) % len(_GANTT_COLORS)]
+
+
+def _sync_project_client_from_note(session: Session, project: Optional[str], cliente: Optional[str], ctx: str) -> None:
+    """La nota è la fonte di verità per "di chi è" un progetto: se porta sia
+    `project` sia `cliente`, crea il GanttProject corrispondente se non esiste
+    ancora e lo collega al Client (creandolo se serve) — niente più setup
+    manuale nel Gantt, basta scrivere la nota."""
+    if not project or not cliente:
+        return
+    proj = session.exec(
+        select(GanttProject).where(GanttProject.context == ctx, GanttProject.name.ilike(project))
+    ).first()
+    if not proj:
+        proj = GanttProject(name=project, color=_color_for(project), context=ctx)
+        session.add(proj)
+        session.commit()
+        session.refresh(proj)
+    client = session.exec(
+        select(Client).where(Client.context == ctx, Client.name.ilike(cliente))
+    ).first()
+    if not client:
+        client = Client(name=cliente, context=ctx)
+        session.add(client)
+        session.commit()
+        session.refresh(client)
+    if proj.client_id != client.id:
+        proj.client_id = client.id
+        session.add(proj)
+        session.commit()
+
+
 def add_note(
     session: Session,
     content: str,
     tags: str = "",
+    cliente: Optional[str] = None,
     project: Optional[str] = None,
     priority: str = "medium",
+    start_date: Optional[date] = None,
     due_date: Optional[date] = None,
     status: Optional[str] = None,
     assignee: Optional[str] = None,
     ctx: str = "default",
+    milestone_id: Optional[int] = None,
 ) -> Note:
-    note = Note(content=content, tags=tags, project=project, priority=priority,
-                due_date=due_date, status=status, assignee=assignee, context=ctx)
+    note = Note(content=content, tags=tags, cliente=cliente, project=project, priority=priority,
+                start_date=start_date, due_date=due_date, status=status, assignee=assignee,
+                context=ctx, milestone_id=milestone_id)
     session.add(note)
     session.commit()
+    session.refresh(note)
+    _sync_project_client_from_note(session, note.project, note.cliente, ctx)
+    # _sync_project_client_from_note may have committed again (creating the
+    # Client / updating the GanttProject), which expires `note`'s attributes
+    # (expire_on_commit) — refresh once more so it's safe to read after the
+    # caller's `with get_session()` block has already closed.
     session.refresh(note)
     return note
 
@@ -122,8 +169,12 @@ def edit_note(
     note_id: int,
     content: Optional[str] = None,
     tags: Optional[str] = None,
+    cliente: Optional[str] = None,
+    clear_cliente: bool = False,
     project: Optional[str] = None,
     priority: Optional[str] = None,
+    start_date: Optional[date] = None,
+    clear_start: bool = False,
     due_date: Optional[date] = None,
     clear_due: bool = False,
     status: Optional[str] = None,
@@ -132,18 +183,29 @@ def edit_note(
     clear_assignee: bool = False,
     milestone_id: Optional[int] = None,
     clear_milestone: bool = False,
+    ctx: Optional[str] = None,
 ) -> Optional[Note]:
     note = session.get(Note, note_id)
     if not note:
+        return None
+    if ctx is not None and note.context != ctx:
         return None
     if content is not None:
         note.content = content
     if tags is not None:
         note.tags = tags
+    if clear_cliente:
+        note.cliente = None
+    elif cliente is not None:
+        note.cliente = cliente or None
     if project is not None:
         note.project = project or None
     if priority is not None:
         note.priority = priority
+    if clear_start:
+        note.start_date = None
+    elif start_date is not None:
+        note.start_date = start_date
     if clear_due:
         note.due_date = None
     elif due_date is not None:
@@ -164,12 +226,15 @@ def edit_note(
     session.add(note)
     session.commit()
     session.refresh(note)
+    _sync_project_client_from_note(session, note.project, note.cliente, note.context)
+    session.refresh(note)  # vedi commento in add_note: il sync può aver committato di nuovo
     return note
 
 
 def get_board_notes(
     session: Session,
     project: Optional[str] = None,
+    cliente: Optional[str] = None,
     assignee: Optional[str] = None,
     tag: Optional[str] = None,
     priority: Optional[str] = None,
@@ -177,11 +242,12 @@ def get_board_notes(
     created_today: bool = False,
     due_filter: Optional[str] = None,
     no_project: bool = False,
+    no_cliente: bool = False,
     no_tag: bool = False,
     ctx: str = "default",
 ) -> list[Note]:
     stmt = select(Note).where(Note.status.isnot(None), Note.context == ctx)
-    stmt = _apply_board_filters(stmt, project, assignee, tag, priority, query, created_today, due_filter, no_project, no_tag)
+    stmt = _apply_board_filters(stmt, project, cliente, assignee, tag, priority, query, created_today, due_filter, no_project, no_cliente, no_tag)
     stmt = stmt.order_by(Note.sort_order.asc(), Note.created_at.desc()).limit(500)
     return session.exec(stmt).all()
 
@@ -190,6 +256,7 @@ def get_inbox_notes(
     session: Session,
     days: int = 7,
     project: Optional[str] = None,
+    cliente: Optional[str] = None,
     assignee: Optional[str] = None,
     tag: Optional[str] = None,
     priority: Optional[str] = None,
@@ -197,6 +264,7 @@ def get_inbox_notes(
     created_today: bool = False,
     due_filter: Optional[str] = None,
     no_project: bool = False,
+    no_cliente: bool = False,
     no_tag: bool = False,
     ctx: str = "default",
     limit: int = 50,
@@ -207,7 +275,7 @@ def get_inbox_notes(
         .where(Note.status.is_(None), Note.context == ctx)
         .where(Note.created_at >= since)
     )
-    stmt = _apply_board_filters(stmt, project, assignee, tag, priority, query, created_today, due_filter, no_project, no_tag)
+    stmt = _apply_board_filters(stmt, project, cliente, assignee, tag, priority, query, created_today, due_filter, no_project, no_cliente, no_tag)
     stmt = stmt.order_by(Note.sort_order.asc(), Note.created_at.desc()).limit(limit)
     return session.exec(stmt).all()
 
@@ -215,6 +283,7 @@ def get_inbox_notes(
 def _apply_board_filters(
     stmt,
     project: Optional[str] = None,
+    cliente: Optional[str] = None,
     assignee: Optional[str] = None,
     tag: Optional[str] = None,
     priority: Optional[str] = None,
@@ -222,12 +291,17 @@ def _apply_board_filters(
     created_today: bool = False,
     due_filter: Optional[str] = None,
     no_project: bool = False,
+    no_cliente: bool = False,
     no_tag: bool = False,
 ):
     if no_project:
         stmt = stmt.where(or_(Note.project.is_(None), Note.project == ""))
     elif project:
         stmt = stmt.where(Note.project.ilike(f"%{project}%"))
+    if no_cliente:
+        stmt = stmt.where(or_(Note.cliente.is_(None), Note.cliente == ""))
+    elif cliente:
+        stmt = stmt.where(Note.cliente.ilike(f"%{cliente}%"))
     if assignee:
         stmt = stmt.where(Note.assignee.ilike(f"%{assignee.lstrip('@')}%"))
     if no_tag:
@@ -278,14 +352,40 @@ def get_notes_last_n_days(session: Session, days: int = 7, ctx: str = "default")
     return session.exec(stmt).all()
 
 
-def delete_note(session: Session, note_id: int) -> bool:
+def delete_note(session: Session, note_id: int, ctx: Optional[str] = None) -> bool:
     note = session.get(Note, note_id)
     if not note:
         return False
+    if ctx is not None and note.context != ctx:
+        return False
     session.exec(sa_delete(Document).where(Document.note_id == note_id))
+    session.exec(sa_delete(NoteDependency).where(
+        or_(NoteDependency.note_id == note_id, NoteDependency.blocker_id == note_id)
+    ))
     session.delete(note)
     session.commit()
     return True
+
+
+def get_note_for_ctx(session: Session, note_id: int, ctx: Optional[str] = None) -> Optional[Note]:
+    note = session.get(Note, note_id)
+    if not note:
+        return None
+    if ctx is not None and note.context != ctx:
+        return None
+    return note
+
+
+def save_email_draft(session: Session, note_id: int, subject: str, body: str) -> Optional[Note]:
+    note = session.get(Note, note_id)
+    if not note:
+        return None
+    note.email_subject = subject
+    note.email_body = body
+    session.add(note)
+    session.commit()
+    session.refresh(note)
+    return note
 
 
 def get_due_notes(session: Session, ctx: str = "default") -> list[Note]:
@@ -297,6 +397,46 @@ def get_due_notes(session: Session, ctx: str = "default") -> list[Note]:
         .order_by(Note.due_date.asc())
     )
     return session.exec(stmt).all()
+
+
+def get_today_activity(session: Session, ctx: str = "default", include_done: bool = False) -> dict[str, list[Note]]:
+    """Attività trasversali del giorno: scadute, in scadenza a breve (oggi o
+    nei prossimi 2 giorni — stessa soglia "soon" già usata per il badge
+    scadenza nelle note), che iniziano oggi, o senza nessuna data —
+    indipendentemente da cliente/progetto/stream, per avere un colpo d'occhio
+    su cosa affrontare senza girare per il Gantt. Ogni nota finisce in un solo
+    bucket anche se soddisfa più criteri (priorità: overdue > due_soon >
+    starting_today > no_date)."""
+    today = date.today()
+    soon_cutoff = today + timedelta(days=2)
+    stmt = select(Note).where(
+        Note.context == ctx,
+        or_(
+            and_(Note.due_date.isnot(None), Note.due_date < today),
+            and_(Note.due_date.isnot(None), Note.due_date <= soon_cutoff),
+            Note.start_date == today,
+            and_(Note.start_date.is_(None), Note.due_date.is_(None)),
+        ),
+    )
+    if not include_done:
+        stmt = stmt.where(or_(Note.status.is_(None), Note.status != "done"))
+    notes = session.exec(stmt).all()
+
+    overdue, due_soon, starting_today, no_date = [], [], [], []
+    for n in notes:
+        if n.due_date and n.due_date < today:
+            overdue.append(n)
+        elif n.due_date and n.due_date <= soon_cutoff:
+            due_soon.append(n)
+        elif n.start_date == today:
+            starting_today.append(n)
+        else:
+            no_date.append(n)
+    overdue.sort(key=lambda n: n.due_date)
+    due_soon.sort(key=lambda n: n.due_date)
+    starting_today.sort(key=lambda n: n.created_at)
+    no_date.sort(key=lambda n: n.created_at)
+    return {"overdue": overdue, "due_soon": due_soon, "starting_today": starting_today, "no_date": no_date}
 
 
 def _fts_query(query: str) -> str:
@@ -396,6 +536,130 @@ def get_recent_recaps(session: Session, days: int = 90, ctx: str = "default") ->
 
 # ── Gantt ──────────────────────────────────────────────────────────────────────
 
+# ── Clients ────────────────────────────────────────────────────────────────────
+
+def get_clients(session: Session, ctx: str = "default") -> list[Client]:
+    return session.exec(
+        select(Client).where(Client.context == ctx).order_by(Client.created_at.asc())
+    ).all()
+
+def add_client(session: Session, name: str, ctx: str = "default") -> Client:
+    c = Client(name=name, context=ctx)
+    session.add(c); session.commit(); session.refresh(c)
+    return c
+
+def edit_client(session: Session, client_id: int, name: Optional[str] = None) -> Optional[Client]:
+    c = session.get(Client, client_id)
+    if not c: return None
+    if name is not None: c.name = name
+    session.add(c); session.commit(); session.refresh(c)
+    return c
+
+def delete_client(session: Session, client_id: int) -> bool:
+    """Elimina il cliente. I progetti collegati restano (client_id -> NULL), non vengono cancellati."""
+    c = session.get(Client, client_id)
+    if not c: return False
+    session.exec(sa_update(GanttProject).where(GanttProject.client_id == client_id).values(client_id=None))
+    session.delete(c)
+    session.commit()
+    return True
+
+def assign_gantt_project_client(session: Session, project_id: int, client_id: Optional[int]) -> Optional[GanttProject]:
+    p = session.get(GanttProject, project_id)
+    if not p: return None
+    p.client_id = client_id
+    session.add(p); session.commit(); session.refresh(p)
+    return p
+
+
+# ── Absences ─────────────────────────────────────────────────────────────────
+
+def get_absences(session: Session, ctx: str = "default") -> list[Absence]:
+    return session.exec(
+        select(Absence).where(Absence.context == ctx).order_by(Absence.start_date.asc())
+    ).all()
+
+def add_absence(session: Session, person: str, start_date: date, end_date: date, ctx: str = "default", color: Optional[str] = None) -> Absence:
+    a = Absence(person=person, start_date=start_date, end_date=end_date, context=ctx, color=color)
+    session.add(a); session.commit(); session.refresh(a)
+    return a
+
+def edit_absence_color(session: Session, absence_id: int, color: Optional[str]) -> Optional[Absence]:
+    a = session.get(Absence, absence_id)
+    if not a: return None
+    a.color = color
+    session.add(a); session.commit(); session.refresh(a)
+    return a
+
+def delete_absence(session: Session, absence_id: int) -> bool:
+    a = session.get(Absence, absence_id)
+    if not a: return False
+    session.delete(a)
+    session.commit()
+    return True
+
+
+# ── Streams ──────────────────────────────────────────────────────────────────
+
+def get_streams(session: Session, project_id: int) -> list[Stream]:
+    return session.exec(
+        select(Stream).where(Stream.project_id == project_id).order_by(Stream.start_date.asc())
+    ).all()
+
+def add_stream(
+    session: Session,
+    project_id: int,
+    name: str,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+) -> Stream:
+    s = Stream(project_id=project_id, name=name, start_date=start_date, end_date=end_date)
+    session.add(s); session.commit(); session.refresh(s)
+    return s
+
+def edit_stream(
+    session: Session,
+    stream_id: int,
+    name: Optional[str] = None,
+    start_date: Optional[date] = None,
+    clear_start: bool = False,
+    end_date: Optional[date] = None,
+    clear_end: bool = False,
+) -> Optional[Stream]:
+    s = session.get(Stream, stream_id)
+    if not s: return None
+    if name is not None: s.name = name
+    if clear_start:
+        s.start_date = None
+    elif start_date is not None:
+        s.start_date = start_date
+    if clear_end:
+        s.end_date = None
+    elif end_date is not None:
+        s.end_date = end_date
+    if s.note_id:
+        note = session.get(Note, s.note_id)
+        if note:
+            if name is not None:
+                note.content = name
+            if clear_end:
+                note.due_date = None
+            elif end_date is not None:
+                note.due_date = end_date
+            note.updated_at = datetime.now()
+            session.add(note)
+    session.add(s); session.commit(); session.refresh(s)
+    return s
+
+def delete_stream(session: Session, stream_id: int) -> bool:
+    """Elimina lo stream. La nota auto-creata collegata (note.milestone_id) resta, solo scollegata."""
+    s = session.get(Stream, stream_id)
+    if not s: return False
+    session.exec(sa_update(Note).where(Note.milestone_id == stream_id).values(milestone_id=None))
+    session.delete(s); session.commit()
+    return True
+
+
 def get_gantt_projects(session: Session, ctx: str = "default") -> list[GanttProject]:
     return session.exec(
         select(GanttProject)
@@ -428,72 +692,61 @@ def unarchive_gantt_project(session: Session, project_id: int) -> bool:
     session.commit()
     return True
 
-def get_milestones(session: Session, project_id: int) -> list[Milestone]:
-    return session.exec(
-        select(Milestone).where(Milestone.project_id == project_id).order_by(Milestone.start_date.asc())
-    ).all()
-
-def get_milestones_by_project_name(session: Session, project_name: str, ctx: str = "default") -> list["Milestone"]:
-    from db.models import GanttProject
-    proj = session.exec(
-        select(GanttProject).where(
-            GanttProject.context == ctx,
-            GanttProject.name.ilike(project_name)
-        )
-    ).first()
-    if not proj:
-        return []
-    return get_milestones(session, proj.id)
-
-def add_gantt_project(session: Session, name: str, color: str = "#818cf8", ctx: str = "default", is_background: bool = False) -> GanttProject:
-    p = GanttProject(name=name, color=color, context=ctx, is_background=is_background)
+def add_gantt_project(
+    session: Session,
+    name: str,
+    color: str = "#818cf8",
+    ctx: str = "default",
+    is_background: bool = False,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+) -> GanttProject:
+    p = GanttProject(name=name, color=color, context=ctx, is_background=is_background,
+                      start_date=start_date, end_date=end_date)
     session.add(p); session.commit(); session.refresh(p)
     return p
 
-def edit_gantt_project(session: Session, project_id: int, name: Optional[str] = None, color: Optional[str] = None, is_background: Optional[bool] = None) -> Optional[GanttProject]:
+def edit_gantt_project(
+    session: Session,
+    project_id: int,
+    name: Optional[str] = None,
+    color: Optional[str] = None,
+    is_background: Optional[bool] = None,
+    start_date: Optional[date] = None,
+    clear_start: bool = False,
+    end_date: Optional[date] = None,
+    clear_end: bool = False,
+) -> Optional[GanttProject]:
     p = session.get(GanttProject, project_id)
     if not p: return None
     if name is not None: p.name = name
     if color is not None: p.color = color
     if is_background is not None: p.is_background = is_background
+    if clear_start:
+        p.start_date = None
+    elif start_date is not None:
+        p.start_date = start_date
+    if clear_end:
+        p.end_date = None
+    elif end_date is not None:
+        p.end_date = end_date
     session.add(p); session.commit(); session.refresh(p)
     return p
 
 def delete_gantt_project(session: Session, project_id: int) -> bool:
+    """Elimina il progetto. Note collegate ai suoi stream restano,
+    solo scollegate (milestone_id -> NULL) — niente viene cancellato
+    oltre al progetto stesso e ai suoi Stream."""
     p = session.get(GanttProject, project_id)
     if not p: return False
-    for m in session.exec(select(Milestone).where(Milestone.project_id == project_id)).all():
-        session.delete(m)
+    stream_ids = session.exec(
+        select(Stream.id).where(Stream.project_id == project_id)
+    ).all()
+    if stream_ids:
+        session.exec(sa_update(Note).where(Note.milestone_id.in_(stream_ids)).values(milestone_id=None))
+    for s in session.exec(select(Stream).where(Stream.project_id == project_id)).all():
+        session.delete(s)
     session.delete(p); session.commit()
-    return True
-
-def add_milestone(session: Session, project_id: int, name: str, start_date: date, end_date: date) -> Milestone:
-    m = Milestone(project_id=project_id, name=name, start_date=start_date, end_date=end_date)
-    session.add(m); session.commit(); session.refresh(m)
-    return m
-
-def edit_milestone(session: Session, milestone_id: int, name: Optional[str] = None, start_date: Optional[date] = None, end_date: Optional[date] = None) -> Optional[Milestone]:
-    m = session.get(Milestone, milestone_id)
-    if not m: return None
-    if name is not None: m.name = name
-    if start_date is not None: m.start_date = start_date
-    if end_date is not None: m.end_date = end_date
-    if m.note_id:
-        note = session.get(Note, m.note_id)
-        if note:
-            if name is not None:
-                note.content = name
-            if end_date is not None:
-                note.due_date = end_date
-            note.updated_at = datetime.now()
-            session.add(note)
-    session.add(m); session.commit(); session.refresh(m)
-    return m
-
-def delete_milestone(session: Session, milestone_id: int) -> bool:
-    m = session.get(Milestone, milestone_id)
-    if not m: return False
-    session.delete(m); session.commit()
     return True
 
 # ── Note Dependencies ──────────────────────────────────────────────────────────
@@ -650,8 +903,23 @@ def get_all_documents(session: Session, ctx: str = "default", limit: int = 200) 
 
 # ── Gantt ──────────────────────────────────────────────────────────────────────
 
+def _reconcile_projects_from_notes(session: Session, ctx: str) -> None:
+    """Rete di sicurezza: se per qualche motivo una nota con cliente+progetto
+    non ha (ancora) fatto scattare _sync_project_client_from_note al momento
+    della creazione/modifica, questa riconciliazione (eseguita ad ogni lettura
+    del Gantt) recupera i progetti/clienti mancanti — la nota non deve restare
+    invisibile nel Gantt solo perché non ha ancora delle date."""
+    pairs = session.exec(
+        select(Note.cliente, Note.project)
+        .where(Note.context == ctx, Note.cliente.isnot(None), Note.project.isnot(None))
+        .distinct()
+    ).all()
+    for cliente, project in pairs:
+        _sync_project_client_from_note(session, project, cliente, ctx)
+
+
 def get_gantt_data(session: Session, ctx: str = "default") -> dict:
-    from sqlalchemy import text as sa_text
+    _reconcile_projects_from_notes(session, ctx=ctx)
     projects = get_gantt_projects(session, ctx=ctx)
 
     # IDs of notes that are actual blockers of something (appear as blocker_id in NoteDependency)
@@ -659,9 +927,72 @@ def get_gantt_data(session: Session, ctx: str = "default") -> dict:
         session.exec(select(NoteDependency.blocker_id)).all()
     )
 
+    clients = get_clients(session, ctx=ctx)
+    client_name_map = {c.id: c.name for c in clients}
+
+    # All stream-linked notes for the whole context, grouped by milestone_id
+    # (legacy column name, v. Note.milestone_id) in Python — avoids one query
+    # per stream (N+1) across every project.
+    def _note_period_key(n: Note):
+        # Ordine "di periodo": start_date se c'è, altrimenti due_date, altrimenti
+        # data di creazione — non l'id/ordine di inserimento della nota.
+        return n.start_date or n.due_date or n.created_at.date()
+
+    all_stream_notes = session.exec(
+        select(Note).where(Note.context == ctx, Note.milestone_id.isnot(None))
+    ).all()
+    notes_by_stream: dict[int, list[Note]] = {}
+    for n in all_stream_notes:
+        notes_by_stream.setdefault(n.milestone_id, []).append(n)
+    for notes in notes_by_stream.values():
+        notes.sort(key=_note_period_key)
+
+    def _stream_data(s: Stream, project_name: str) -> dict:
+        linked = notes_by_stream.get(s.id, [])
+        progress_notes = linked[:]
+        stream_note = None
+        if s.note_id and not any(n.id == s.note_id for n in progress_notes):
+            stream_note = session.get(Note, s.note_id)
+            if stream_note and stream_note.context == ctx:
+                progress_notes.append(stream_note)
+        if not s.note_id:
+            stream_note = session.exec(
+                select(Note)
+                .where(Note.context == ctx, Note.project.ilike(project_name))
+                .where(Note.content == s.name, Note.due_date == s.end_date)
+                .where(or_(
+                    Note.tags == "milestone",
+                    Note.tags.ilike("milestone,%"),
+                    Note.tags.ilike("%,milestone"),
+                    Note.tags.ilike("%,milestone,%"),
+                ))
+            ).first()
+            if stream_note and not any(n.id == stream_note.id for n in progress_notes):
+                progress_notes.append(stream_note)
+        progress_total = len(progress_notes)
+        progress_done = sum(1 for n in progress_notes if n.status == "done")
+        progress = round(progress_done / progress_total * 100) if progress_total else 0
+        return {
+            "id": s.id,
+            "name": s.name,
+            "start_date": str(s.start_date) if s.start_date else None,
+            "end_date": str(s.end_date) if s.end_date else None,
+            "note_id": s.note_id,
+            "progress": progress,
+            "progress_done": progress_done,
+            "progress_total": progress_total,
+            "linked_notes": [
+                {"id": n.id, "content": n.content, "status": n.status,
+                 "start_date": str(n.start_date) if n.start_date else None,
+                 "due_date": str(n.due_date) if n.due_date else None,
+                 "created_at": n.created_at.date().isoformat()}
+                for n in linked
+            ]
+        }, progress_done, progress_total
+
     result = []
     for p in projects:
-        milestones = get_milestones(session, p.id)
+        streams = [] if p.is_background else get_streams(session, p.id)
         notes_with_due = session.exec(
             select(Note)
             .where(Note.due_date.isnot(None), Note.context == ctx)
@@ -672,6 +1003,7 @@ def get_gantt_data(session: Session, ctx: str = "default") -> dict:
             .where(~Note.tags.ilike("%,milestone"))
             .where(~Note.tags.ilike("%,milestone,%"))
         ).all()
+        notes_with_due.sort(key=_note_period_key)
 
         # All notes of this project (to check risk)
         all_proj_notes = session.exec(
@@ -685,50 +1017,17 @@ def get_gantt_data(session: Session, ctx: str = "default") -> dict:
             for n in all_proj_notes
         )
 
-        milestones_data = []
-        for m in milestones:
-            linked = session.exec(
-                select(Note).where(Note.milestone_id == m.id, Note.context == ctx)
-            ).all()
-            progress_notes = linked[:]
-            milestone_note = None
-            if m.note_id and not any(n.id == m.note_id for n in progress_notes):
-                milestone_note = session.get(Note, m.note_id)
-                if milestone_note and milestone_note.context == ctx:
-                    progress_notes.append(milestone_note)
-            if not m.note_id:
-                milestone_note = session.exec(
-                    select(Note)
-                    .where(Note.context == ctx, Note.project.ilike(p.name))
-                    .where(Note.content == m.name, Note.due_date == m.end_date)
-                    .where(or_(
-                        Note.tags == "milestone",
-                        Note.tags.ilike("milestone,%"),
-                        Note.tags.ilike("%,milestone"),
-                        Note.tags.ilike("%,milestone,%"),
-                    ))
-                ).first()
-                if milestone_note and not any(n.id == milestone_note.id for n in progress_notes):
-                    progress_notes.append(milestone_note)
-            progress_total = len(progress_notes)
-            progress_done = sum(1 for n in progress_notes if n.status == "done")
-            progress = round(progress_done / progress_total * 100) if progress_total else 0
-            milestones_data.append({
-                "id": m.id,
-                "name": m.name,
-                "start_date": str(m.start_date),
-                "end_date": str(m.end_date),
-                "note_id": m.note_id,
-                "progress": progress,
-                "progress_done": progress_done,
-                "progress_total": progress_total,
-                "linked_notes": [
-                    {"id": n.id, "content": n.content, "status": n.status,
-                     "due_date": str(n.due_date) if n.due_date else None,
-                     "created_at": n.created_at.date().isoformat()}
-                    for n in linked
-                ]
-            })
+        proj_done_total = 0
+        proj_notes_total = 0
+
+        streams_data = []
+        for s in streams:
+            data, done, total = _stream_data(s, p.name)
+            streams_data.append(data)
+            proj_done_total += done
+            proj_notes_total += total
+
+        project_progress = round(proj_done_total / proj_notes_total * 100) if proj_notes_total else 0
 
         result.append({
             "id": p.id,
@@ -736,11 +1035,25 @@ def get_gantt_data(session: Session, ctx: str = "default") -> dict:
             "color": p.color,
             "is_background": p.is_background,
             "has_risk_blocker": has_risk_blocker,
-            "milestones": milestones_data,
+            "client_id": p.client_id,
+            "client_name": client_name_map.get(p.client_id),
+            "start_date": str(p.start_date) if p.start_date else None,
+            "end_date": str(p.end_date) if p.end_date else None,
+            "streams": streams_data,
+            "progress": project_progress,
             "notes": [
                 {"id": n.id, "content": n.content, "due_date": str(n.due_date), "status": n.status,
+                 "start_date": str(n.start_date) if n.start_date else None,
                  "assignee": n.assignee, "created_at": n.created_at.date().isoformat()}
                 for n in notes_with_due
             ]
         })
-    return {"projects": result}
+    absences = get_absences(session, ctx=ctx)
+    return {
+        "projects": result,
+        "clients": [{"id": c.id, "name": c.name} for c in clients],
+        "absences": [
+            {"id": a.id, "person": a.person, "start_date": str(a.start_date), "end_date": str(a.end_date), "color": a.color}
+            for a in absences
+        ],
+    }

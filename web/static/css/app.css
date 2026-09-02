@@ -397,12 +397,12 @@
   .board-filter-input::placeholder { color: var(--text-dim); }
   .board-filter-check { display: inline-flex; align-items: center; gap: 5px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; color: var(--text-muted); font-size: 0.78rem; padding: 5px 9px; cursor: pointer; }
   .board-filter-check input { accent-color: var(--accent); }
-  .board-container { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; align-items: start; }
-  .board-col { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); display: flex; flex-direction: column; max-height: calc(100vh - 200px); }
+  .board-container { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-items: start; }
+  .board-col { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); display: flex; flex-direction: column; max-height: calc(50vh - 100px); }
   .board-col-header { padding: 10px 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
   .board-col-title { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
   .board-col-body { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
-  .board-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; transition: border-color 0.15s; border-left: 3px solid transparent; position: relative; cursor: pointer; }
+  .board-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 11px; transition: border-color 0.15s; border-left: 3px solid transparent; position: relative; cursor: pointer; display: flex; flex-direction: column; gap: 5px; }
   .board-card:hover { border-color: var(--border-hover); }
   .board-card:hover .delete-btn { opacity: 1; }
   .board-card-ghost { opacity: 0.35; background: var(--accent-dim); border: 1px dashed var(--accent); }
@@ -411,10 +411,11 @@
   .board-card.priority-high { border-left-color: var(--red); }
   .board-card.priority-medium { border-left-color: var(--yellow); }
   .board-card.priority-low { border-left-color: var(--green); }
-  .board-card-content { font-size: 0.85rem; color: var(--text); line-height: 1.45; margin-bottom: 6px; cursor: text; border-radius: 4px; padding: 2px 4px; margin-left: -4px; transition: background 0.15s; }
+  .board-card-content { font-size: 0.85rem; color: var(--text); line-height: 1.4; cursor: text; border-radius: 4px; padding: 2px 4px; margin: -2px 0 -2px -4px; transition: background 0.15s; overflow-wrap: break-word; white-space: normal; }
   .board-card-content:hover { background: rgba(255,255,255,0.04); }
   .board-card-content[contenteditable="true"] { outline: none; background: rgba(129,140,248,0.08); box-shadow: 0 0 0 1px var(--accent); }
-  .board-card-meta { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+  .board-card-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .board-card-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
 
   /* ── Assignee ────────────────────────────────────────── */
   .assignee-badge { font-size: 0.65rem; background: var(--surface); border: 1px solid var(--border); color: var(--text-muted); padding: 1px 6px; border-radius: 8px; white-space: nowrap; cursor: pointer; transition: border-color 0.15s, color 0.15s; }
@@ -549,10 +550,6 @@
   .gantt-ms-item:hover .gantt-ms-del { opacity: 1; }
   .gantt-ms-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
   .gantt-ms-dates { font-size: 0.68rem; color: var(--text-dim); }
-  .gantt-ms-progress-row { display: flex; align-items: center; gap: 5px; margin-top: 2px; }
-  .gantt-ms-progress { display: block; height: 4px; width: 72px; background: var(--surface2); border-radius: 999px; overflow: hidden; }
-  .gantt-ms-progress span { display: block; height: 100%; background: var(--green); border-radius: inherit; }
-  .gantt-ms-progress-label { font-size: 0.62rem; color: var(--text-muted); min-width: 26px; font-weight: 700; }
   .gantt-ms-edit-form { flex: 1; display: flex; flex-direction: column; gap: 4px; padding: 3px; }
   .gantt-ms-edit-form .gantt-input { font-size: 0.72rem; padding: 3px 7px; }
   .gantt-ms-edit-dates, .gantt-ms-edit-actions { display: flex; gap: 4px; }
@@ -598,12 +595,12 @@
     box-shadow: inset 0 0 0 999px rgba(255,255,255,0.03);
   }
   .gantt-bg-label {
-    position: absolute; top: 2px;
+    position: absolute; top: 2px; left: 2px;
     font-size: 0.64rem; font-weight: 800;
-    opacity: 0.95; text-align: center;
+    padding: 1px 7px; border-radius: 999px;
     pointer-events: none; z-index: 1;
-    overflow: hidden; white-space: nowrap;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.55);
+    overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
   }
 
   /* ── Dependencies ────────────────────────────────────── */
@@ -643,8 +640,10 @@
   .gantt-track-bg { position: absolute; inset: 0; background: var(--surface2); border-radius: 4px; opacity: 0.5; }
   .gantt-bar { position: absolute; height: 22px; top: 3px; border-radius: 5px; display: flex; align-items: center; padding: 0 8px; font-size: 0.68rem; font-weight: 600; color: #fff; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: default; min-width: 6px; transition: filter 0.15s; }
   .gantt-bar:hover { filter: brightness(1.15); }
-  .gantt-bar-progress { position: absolute; inset: 0 auto 0 0; background: rgba(255,255,255,0.24); pointer-events: none; }
   .gantt-bar-label { position: relative; z-index: 1; overflow: hidden; text-overflow: ellipsis; }
+  /* Periodo del progetto: una "parentesi" che inquadra visivamente gli Stream
+     sottostanti, senza competere con le loro barre colorate piene. */
+  .gantt-project-bar { position: absolute; top: 0; bottom: 0; border: 2px solid; border-radius: 4px; background: transparent; pointer-events: none; opacity: 0.55; }
   .gantt-today-line { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: var(--accent); opacity: 0.6; border-radius: 1px; pointer-events: none; z-index: 5; }
   /* Diamond: rotated square */
   .gantt-diamond { position: absolute; width: 10px; height: 10px; top: 9px; margin-left: -5px; transform: rotate(45deg); cursor: pointer; z-index: 10; transition: transform 0.15s; }
@@ -653,8 +652,12 @@
   .gantt-diamond.today   { background: var(--yellow); }
   .gantt-diamond.future  { background: var(--accent); }
   .gantt-diamond.done    { background: var(--green); }
-  .gantt-notes-row .gantt-row-label { font-size: 0.65rem; color: var(--text-dim); font-style: italic; }
-  .gantt-notes-row .gantt-row-track { height: 24px; }
+  /* Nota con stato diverso da todo: l'emoji di stato al posto del rombo generico */
+  .gantt-note-emoji { position: absolute; top: 50%; left: 0; transform: translate(-50%, -50%); font-size: 14px; line-height: 1; cursor: pointer; z-index: 10; transition: transform 0.15s; }
+  .gantt-note-emoji:hover { transform: translate(-50%, -50%) scale(1.3); }
+  .gantt-notes-row { align-items: flex-start; }
+  .gantt-notes-row .gantt-row-label { font-size: 0.65rem; color: var(--text-dim); font-style: italic; white-space: normal; overflow: visible; text-overflow: unset; overflow-wrap: break-word; padding-top: 3px; }
+  .gantt-notes-row .gantt-row-track { height: 26px; }
 
   /* ── Mobile bottom nav + FAB (global, hidden on desktop) ─ */
   .mobile-bottom-nav {
@@ -753,8 +756,8 @@
     .note-meta { gap: 6px; margin-bottom: 7px; }
     .status, .priority { padding: 3px 8px; font-size: 0.7rem; }
 
-    /* Board: horizontal scroll */
-    .board-container { grid-template-columns: repeat(7, min(220px, 78vw)); overflow-x: auto; padding-bottom: 8px; }
+    /* Board: horizontal scroll (una riga sola su schermi stretti, più leggibile di 2 righe compresse) */
+    .board-container { grid-template-columns: repeat(8, min(220px, 78vw)); overflow-x: auto; padding-bottom: 8px; }
     .board-col { max-height: calc(100dvh - 185px); }
     .board-filters { gap: 6px; }
     .focus-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -993,9 +996,15 @@
 .ms-pick-item.ms-pick-active { background: var(--accent-dim); color: var(--accent); }
 
 /* ── Gantt sub-note rows ────────────────────────────────────────── */
+.gantt-subnote-row { align-items: flex-start; }
 .gantt-subnote-row .gantt-row-label {
-  display: flex; align-items: center; gap: 3px;
+  display: flex; align-items: flex-start; gap: 3px;
   color: var(--text-dim); font-style: italic;
+  padding-top: 3px;
+}
+.gantt-subnote-row .gantt-row-label a {
+  white-space: normal !important; overflow: visible !important; text-overflow: unset !important;
+  overflow-wrap: break-word;
 }
 .gantt-subnote-row .gantt-row-track { opacity: 0.75; }
 .gantt-subnote-pin {
@@ -1005,6 +1014,11 @@
   transition: transform 0.15s;
 }
 .gantt-subnote-pin:hover { transform: translateX(-50%) scale(1.5); }
+.gantt-subnote-bar {
+  position: absolute; height: 8px; top: 50%; margin-top: -4px;
+  border-radius: 4px; min-width: 6px; transition: filter 0.15s;
+}
+.gantt-subnote-bar:hover { filter: brightness(1.3); }
 
 /* ── Markdown Editor tab ────────────────────────────────────────── */
 #view-editor { height: calc(100vh - 52px); display: none; flex-direction: column; overflow: hidden; }

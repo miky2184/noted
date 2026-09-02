@@ -9,7 +9,7 @@ from sqlmodel import delete as sql_delete, select
 
 from db import crud
 from db.engine import DATABASE_URL, engine, get_session, init_db
-from db.models import Context, GanttProject, Milestone, Note, Recap
+from db.models import Context, Document, GanttProject, Stream, Note, NoteDependency, Recap
 
 
 def sqlite_backup_filename() -> str:
@@ -33,18 +33,22 @@ def export_json_data() -> dict:
         notes = session.exec(select(Note)).all()
         recaps = session.exec(select(Recap)).all()
         projects = session.exec(select(GanttProject)).all()
-        milestones = session.exec(select(Milestone)).all()
+        streams = session.exec(select(Stream)).all()
+        documents = session.exec(select(Document)).all()
+        dependencies = session.exec(select(NoteDependency)).all()
 
     return {
         "exported_at": date.today().isoformat(),
-        "version": 1,
+        "version": 3,
         "contexts": [{"id": c.id, "name": c.name} for c in contexts],
         "notes": [
             {"id": n.id, "content": n.content, "tags": n.tags,
              "project": n.project, "priority": n.priority,
              "due_date": str(n.due_date) if n.due_date else None,
              "status": n.status, "assignee": n.assignee,
-             "context": n.context, "created_at": n.created_at.isoformat(),
+             "context": n.context, "sort_order": n.sort_order,
+             "milestone_id": n.milestone_id,
+             "created_at": n.created_at.isoformat(),
              "updated_at": n.updated_at.isoformat()}
             for n in notes
         ],
@@ -56,13 +60,36 @@ def export_json_data() -> dict:
         ],
         "gantt_projects": [
             {"id": p.id, "name": p.name, "color": p.color,
+             "is_background": p.is_background, "archived": p.archived,
+             "client_id": p.client_id,
+             "start_date": str(p.start_date) if p.start_date else None,
+             "end_date": str(p.end_date) if p.end_date else None,
              "context": p.context, "created_at": p.created_at.isoformat()}
             for p in projects
         ],
-        "milestones": [
-            {"id": m.id, "project_id": m.project_id, "name": m.name,
-             "start_date": str(m.start_date), "end_date": str(m.end_date)}
-            for m in milestones
+        "streams": [
+            {"id": s.id, "project_id": s.project_id, "name": s.name,
+             "start_date": str(s.start_date) if s.start_date else None,
+             "end_date": str(s.end_date) if s.end_date else None,
+             "note_id": s.note_id}
+            for s in streams
+        ],
+        # Files themselves stay on disk under doc_root — only the pointer is
+        # backed up here, same as the rest of the app's document handling
+        # (see README "Gestione documenti"). Restoring on another machine
+        # without also copying doc_root will leave these pointing at
+        # not-yet-present files.
+        "documents": [
+            {"id": d.id, "note_id": d.note_id, "rel_path": d.rel_path,
+             "orig_name": d.orig_name, "mime_type": d.mime_type,
+             "size_bytes": d.size_bytes, "sha256": d.sha256, "analysis": d.analysis,
+             "created_at": d.created_at.isoformat()}
+            for d in documents
+        ],
+        "dependencies": [
+            {"id": dep.id, "note_id": dep.note_id, "blocker_id": dep.blocker_id,
+             "created_at": dep.created_at.isoformat()}
+            for dep in dependencies
         ],
     }
 
@@ -72,7 +99,11 @@ def restore_json_data(body: dict) -> None:
         raise ValueError("JSON non valido")
 
     with get_session() as session:
-        session.exec(sql_delete(Milestone))
+        # children first (FK order), so a partial restore never leaves
+        # dangling Document/NoteDependency rows behind
+        session.exec(sql_delete(Document))
+        session.exec(sql_delete(NoteDependency))
+        session.exec(sql_delete(Stream))
         session.exec(sql_delete(GanttProject))
         session.exec(sql_delete(Recap))
         session.exec(sql_delete(Note))
@@ -88,6 +119,8 @@ def restore_json_data(body: dict) -> None:
                 due_date=date.fromisoformat(n["due_date"]) if n.get("due_date") else None,
                 status=n.get("status"), assignee=n.get("assignee"),
                 context=n.get("context", "default"),
+                sort_order=n.get("sort_order", 0),
+                milestone_id=n.get("milestone_id"),
                 created_at=datetime.fromisoformat(n["created_at"]),
                 updated_at=datetime.fromisoformat(n.get("updated_at", n["created_at"])),
             ))
@@ -103,15 +136,39 @@ def restore_json_data(body: dict) -> None:
         for p in body.get("gantt_projects", []):
             session.add(GanttProject(
                 id=p["id"], name=p["name"], color=p.get("color", "#818cf8"),
+                is_background=p.get("is_background", False), archived=p.get("archived", False),
+                # client_id non ripristinato: Client non fa parte del backup JSON
+                # (gap pre-esistente), quindi un id qui punterebbe a una riga
+                # inesistente — il progetto torna semplicemente "senza cliente".
+                start_date=date.fromisoformat(p["start_date"]) if p.get("start_date") else None,
+                end_date=date.fromisoformat(p["end_date"]) if p.get("end_date") else None,
                 context=p.get("context", "default"),
                 created_at=datetime.fromisoformat(p["created_at"]),
             ))
 
-        for m in body.get("milestones", []):
-            session.add(Milestone(
-                id=m["id"], project_id=m["project_id"], name=m["name"],
-                start_date=date.fromisoformat(m["start_date"]),
-                end_date=date.fromisoformat(m["end_date"]),
+        # "streams" è il nome corrente; "milestones" resta supportato in lettura
+        # per i backup JSON esportati prima del rename Milestone -> Stream.
+        for s in body.get("streams") or body.get("milestones") or []:
+            session.add(Stream(
+                id=s["id"], project_id=s["project_id"], name=s["name"],
+                start_date=date.fromisoformat(s["start_date"]) if s.get("start_date") else None,
+                end_date=date.fromisoformat(s["end_date"]) if s.get("end_date") else None,
+                note_id=s.get("note_id"),
+            ))
+
+        for d in body.get("documents", []):
+            session.add(Document(
+                id=d["id"], note_id=d.get("note_id"), rel_path=d["rel_path"],
+                orig_name=d["orig_name"], mime_type=d.get("mime_type"),
+                size_bytes=d.get("size_bytes"), sha256=d.get("sha256"),
+                analysis=d.get("analysis"),
+                created_at=datetime.fromisoformat(d["created_at"]),
+            ))
+
+        for dep in body.get("dependencies", []):
+            session.add(NoteDependency(
+                id=dep["id"], note_id=dep["note_id"], blocker_id=dep["blocker_id"],
+                created_at=datetime.fromisoformat(dep["created_at"]),
             ))
 
         session.commit()

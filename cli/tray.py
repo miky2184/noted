@@ -231,13 +231,15 @@ class NotedTrayApp(rumps.App):
     # ── network ─────────────────────────────────────────────────────────────
 
     def _post_note(self, content: str):
+        from db.config import get_api_token
+
         query = urllib.parse.urlencode({"ctx": self._ctx})
         url = f"{_base_url(self._port)}/api/notes?{query}"
         payload = json.dumps({"content": content}).encode()
         req = urllib.request.Request(
             url,
             data=payload,
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "X-Noted-Token": get_api_token()},
             method="POST",
         )
         try:

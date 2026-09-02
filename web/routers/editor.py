@@ -181,8 +181,15 @@ strong { color: #1a1a2e; }
 """
 
 def _md_to_print_html(content: str) -> str:
+    import html
     import markdown as md_lib
-    html_body = md_lib.markdown(content, extensions=['tables', 'fenced_code', 'nl2br'])
+    # Escape raw HTML in the source *before* running it through markdown, so
+    # literal `<script>`/`<img onerror=...>` etc. in note content is rendered
+    # as inert text instead of executing in the exported/printed page.
+    # markdown syntax (**bold**, # heading, ```code```, ...) is untouched by
+    # html.escape since it only targets & < > " '.
+    safe_content = html.escape(content)
+    html_body = md_lib.markdown(safe_content, extensions=['tables', 'fenced_code', 'nl2br'])
     return (
         f"<!DOCTYPE html><html><head><meta charset='utf-8'>"
         f"<style>{_PRINT_CSS}</style></head><body>{html_body}"

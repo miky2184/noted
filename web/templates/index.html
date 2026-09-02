@@ -13,6 +13,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="noted">
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 <link rel="stylesheet" href="/static/css/app.css">
 
@@ -36,7 +37,8 @@
   </a>
 
   <div class="tabs">
-    <button class="tab-btn active" id="tab-notes" onclick="switchTab('notes')">📝 Oggi</button>
+    <button class="tab-btn active" id="tab-notes" onclick="switchTab('notes')">📝 Note</button>
+    <button class="tab-btn" id="tab-activity" onclick="switchTab('activity')">📌 Attività</button>
     <button class="tab-btn" id="tab-board" onclick="switchTab('board')">🗂 Board</button>
     <button class="tab-btn" id="tab-gantt" onclick="switchTab('gantt')">📊 Gantt</button>
     <button class="tab-btn" id="tab-docs" onclick="switchTab('docs')">📎 Analisi</button>
@@ -121,7 +123,11 @@
 <nav class="mobile-bottom-nav" id="mobile-bottom-nav">
   <button class="mobile-nav-btn active" id="mnav-notes" onclick="switchTab('notes')">
     <span class="mobile-nav-icon">📝</span>
-    <span class="mobile-nav-label">Oggi</span>
+    <span class="mobile-nav-label">Note</span>
+  </button>
+  <button class="mobile-nav-btn" id="mnav-activity" onclick="switchTab('activity')">
+    <span class="mobile-nav-icon">📌</span>
+    <span class="mobile-nav-label">Attività</span>
   </button>
   <button class="mobile-nav-btn" id="mnav-board" onclick="switchTab('board')">
     <span class="mobile-nav-icon">🗂</span>
@@ -151,16 +157,13 @@
         <button type="button" class="mic-btn" id="llm-btn" onclick="toggleLlm()" title="Attiva elaborazione LLM (Ollama)" style="font-size:1rem;">🦙</button>
       </div>
       <div class="add-form-footer">
-        <select id="note-template" title="Template nota" onchange="applyNoteTemplate(this.value)" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-family:inherit;font-size:0.78rem;padding:4px 8px;outline:none;cursor:pointer;">
-          <option value="">template</option>
-          <option value="meeting">Meeting</option>
-          <option value="decision">Decisione</option>
-          <option value="followup">Follow-up</option>
-          <option value="idea">Idea</option>
-        </select>
         <input type="text" id="note-tag" placeholder="#tag" maxlength="60">
+        <input type="text" id="note-cliente" placeholder="cliente" maxlength="60">
         <input type="text" id="note-project" placeholder="progetto" maxlength="60">
+        <input type="text" id="note-stream" list="stream-datalist" placeholder="stream (opzionale)" maxlength="120" autocomplete="off">
+        <datalist id="stream-datalist"></datalist>
         <input type="text" id="note-assignee" placeholder="@persona1 @persona2" maxlength="120">
+        <input type="date" id="note-start" title="Data inizio" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-family:inherit;font-size:0.78rem;padding:4px 8px;outline:none;width:130px;transition:border-color 0.15s;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
         <input type="date" id="note-due" title="Scadenza" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-family:inherit;font-size:0.78rem;padding:4px 8px;outline:none;width:130px;transition:border-color 0.15s;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
         <select id="note-status" title="Stato" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-family:inherit;font-size:0.78rem;padding:4px 8px;outline:none;cursor:pointer;">
           <option value="">— stato</option>
@@ -200,12 +203,26 @@
       <div id="notes-list"></div>
     </div>
 
+    <!-- Attività view: trasversale a clienti/progetti — scadute, che scadono
+         oggi, che iniziano oggi, o senza nessuna data. -->
+    <div id="view-activity" style="display:none;">
+      <div class="section-header">
+        <span class="section-title">Attività di oggi</span>
+        <button id="activity-done-btn" onclick="toggleActivityShowDone()" title="Mostra/nascondi completate"
+          style="margin-left:auto;background:none;border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:0.7rem;color:var(--text-muted);cursor:pointer;white-space:nowrap;transition:all 0.15s;">
+          👁 done
+        </button>
+      </div>
+      <div id="activity-list"></div>
+    </div>
+
     <!-- Board view -->
     <div id="view-board">
       <div class="board-filters">
         <input class="board-filter-input board-filter-wide" id="board-q-filter" placeholder="cerca nella board" onkeydown="if(event.key==='Enter') loadBoard()">
-        <input class="board-filter-input" id="board-tag-filter" placeholder="#tag" onkeydown="if(event.key==='Enter') loadBoard()">
+        <input class="board-filter-input" id="board-cliente-filter" placeholder="filtra per cliente" onkeydown="if(event.key==='Enter') loadBoard()">
         <input class="board-filter-input" id="board-project-filter" placeholder="filtra per progetto" onkeydown="if(event.key==='Enter') loadBoard()">
+        <input class="board-filter-input" id="board-tag-filter" placeholder="#tag" onkeydown="if(event.key==='Enter') loadBoard()">
         <input class="board-filter-input" id="board-assignee-filter" placeholder="filtra per @persona" onkeydown="if(event.key==='Enter') loadBoard()">
         <select class="board-filter-input" id="board-priority-filter" onchange="loadBoard()" title="Priorità">
           <option value="">priorità</option>
@@ -225,6 +242,10 @@
           <input type="checkbox" id="board-created-today-filter" onchange="loadBoard()">
           oggi
         </label>
+        <label class="board-filter-check" title="Mostra note senza cliente">
+          <input type="checkbox" id="board-no-cliente-filter" onchange="loadBoard()">
+          no client
+        </label>
         <label class="board-filter-check" title="Mostra note senza progetto">
           <input type="checkbox" id="board-no-project-filter" onchange="loadBoard()">
           no proj
@@ -233,8 +254,7 @@
           <input type="checkbox" id="board-no-tag-filter" onchange="loadBoard()">
           no tag
         </label>
-        <button onclick="loadBoard()" style="background:var(--accent-dim);border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:5px 12px;font-size:0.78rem;cursor:pointer;">Filtra</button>
-        <button onclick="clearBoardFilters()" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:6px;padding:5px 10px;font-size:0.78rem;cursor:pointer;">✕</button>
+        <button onclick="clearBoardFilters()" title="Pulisci filtri" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:6px;padding:5px 10px;font-size:0.78rem;cursor:pointer;">✕ pulisci filtri</button>
         <div class="refresh-dot" id="board-refresh-dot" style="margin-left:auto"></div>
       </div>
       <div class="board-container" id="board-container"></div>
@@ -348,21 +368,35 @@
         <div class="gantt-panel">
           <div class="gantt-panel-title">Progetti</div>
           <div id="gantt-projects-list"></div>
-          <div class="gantt-divider"></div>
-          <div class="gantt-add-proj-form">
-            <div class="gantt-panel-title">Nuovo progetto</div>
-            <input class="gantt-input" id="gantt-proj-name" placeholder="Nome progetto" maxlength="60">
-            <div class="gantt-colors" id="gantt-color-picker"></div>
-            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;">
-              <input type="checkbox" id="gantt-proj-background" style="accent-color:var(--accent);">
-              Usa come sfondo <span style="opacity:0.6">(es. ferie)</span>
-            </label>
-            <button class="gantt-btn" onclick="addGanttProject()">+ Aggiungi</button>
+          <div class="gantt-add-proj-form" style="padding-top:6px;">
+            <!-- I progetti "normali" si creano da soli scrivendo una nota con
+                 cliente+progetto — qui resta solo la creazione di un progetto
+                 "sfondo" (es. ferie), l'unico caso non derivabile da una nota. -->
+            <button class="gantt-add-ms-btn" onclick="toggleAddBgProject(this)" style="padding-left:0;">+ progetto sfondo</button>
+            <form class="gantt-add-ms-form" id="gantt-bg-project-form" onsubmit="addGanttProject(event)" style="padding-left:0;">
+              <input class="gantt-input" id="gantt-proj-name" placeholder="Nome progetto (es. Ferie)" maxlength="60">
+              <div class="gantt-colors" id="gantt-color-picker"></div>
+              <div style="display:flex;gap:4px;">
+                <button type="submit" class="gantt-btn-sm">Aggiungi</button>
+                <button type="button" class="gantt-btn-sm" onclick="toggleAddBgProject(this.closest('form').previousElementSibling)">Annulla</button>
+              </div>
+            </form>
           </div>
+          <div class="gantt-divider"></div>
+          <div class="gantt-panel-title">Assenze</div>
+          <div id="gantt-absences-section"></div>
         </div>
         <!-- Chart area -->
         <div class="gantt-chart-area">
-          <div style="display:flex;gap:4px;padding:8px 12px 0;justify-content:flex-end;">
+          <div style="display:flex;gap:4px;padding:8px 12px 0;justify-content:flex-end;align-items:center;">
+            <select id="gantt-range-select" class="gantt-zoom-btn" onchange="setGanttRange(this.value)" title="Periodo visualizzato" style="margin-right:6px;">
+              <option value="default" selected>Ultimi giorni + prossime settimane</option>
+              <option value="week">Prossima settimana</option>
+              <option value="2weeks">Prossime 2 settimane</option>
+              <option value="3weeks">Prossime 3 settimane</option>
+              <option value="month">Prossimo mese</option>
+              <option value="all">Tutto il periodo</option>
+            </select>
             <button onclick="setGanttZoom('day')" id="zoom-day" class="gantt-zoom-btn">Giorno</button>
             <button onclick="setGanttZoom('week')" id="zoom-week" class="gantt-zoom-btn">Settimana</button>
             <button onclick="setGanttZoom('month')" id="zoom-month" class="gantt-zoom-btn">Mese</button>
@@ -424,6 +458,24 @@
 </div>
 
 <div id="toast"></div>
+
+<!-- API token modal — blocks first use until a valid token is entered, see notedGetToken() in app.js -->
+<div class="modal-overlay" id="token-modal">
+  <div class="modal" style="max-width:360px;">
+    <div class="modal-title">🔑 Token di accesso</div>
+    <div style="font-size:0.82rem;color:var(--text-muted);line-height:1.6;margin-bottom:14px;">
+      Inserisci il token API di noted. Lo trovi in <b>Impostazioni → 🔑 Accesso</b> su un
+      dispositivo già configurato, oppure lanciando <code>noted token</code> nel terminale
+      del computer che esegue il server.
+    </div>
+    <input type="text" id="token-modal-input" placeholder="Token"
+           style="width:100%;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:0.85rem;padding:8px 10px;outline:none;margin-bottom:14px;"
+           onkeydown="if(event.key==='Enter')notedSubmitToken()">
+    <div style="display:flex;justify-content:flex-end;">
+      <button onclick="notedSubmitToken()" style="background:var(--accent);border:none;color:#0d0f1a;border-radius:6px;padding:6px 16px;font-family:inherit;font-size:0.82rem;font-weight:700;cursor:pointer;">Conferma</button>
+    </div>
+  </div>
+</div>
 
 <!-- Confirm modal -->
 <div class="modal-overlay" id="confirm-modal" onclick="closeConfirm(event)">
@@ -577,6 +629,23 @@
           <button onclick="saveDocRoot()" style="background:var(--accent);color:#0d0f1a;border:none;border-radius:6px;padding:6px 14px;font-size:0.78rem;font-weight:700;cursor:pointer;">Salva</button>
         </div>
         <button onclick="openDocFolder()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:0.75rem;color:var(--text-muted);cursor:pointer;text-align:left;transition:all 0.15s;" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-muted)'">📂 Apri cartella in Finder</button>
+      </div>
+    </div>
+
+    <div style="border-top:1px solid var(--border);margin:20px 0;"></div>
+
+    <!-- Accesso (token API) -->
+    <div>
+      <div style="margin-bottom:10px;"><span class="section-title">🔑 Accesso</span></div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <label style="font-size:0.75rem;color:var(--text-muted);">Token richiesto da nuovi dispositivi (telefono, altri browser)</label>
+        <div style="display:flex;gap:6px;">
+          <input type="password" id="api-token-input" readonly
+                 style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:0.78rem;padding:6px 10px;outline:none;">
+          <button onclick="toggleApiTokenVisibility()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:0.78rem;color:var(--text-muted);cursor:pointer;">👁</button>
+          <button onclick="copyApiToken()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:0.78rem;color:var(--text-muted);cursor:pointer;">📋</button>
+        </div>
+        <button onclick="regenerateApiToken()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:0.75rem;color:var(--red);cursor:pointer;text-align:left;transition:all 0.15s;" onmouseover="this.style.borderColor='var(--red)'" onmouseout="this.style.borderColor='var(--border)'">🔄 Rigenera token (invalida i dispositivi attuali)</button>
       </div>
     </div>
   </div>
