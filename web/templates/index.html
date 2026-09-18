@@ -238,6 +238,7 @@
           <option value="overdue">scadute</option>
           <option value="today">oggi</option>
           <option value="week">prossimi 7 giorni</option>
+          <option value="fiscal_year">anno fiscale corrente</option>
           <option value="has">con scadenza</option>
           <option value="none">senza scadenza</option>
         </select>
@@ -399,6 +400,7 @@
               <option value="2weeks">Prossime 2 settimane</option>
               <option value="3weeks">Prossime 3 settimane</option>
               <option value="month">Prossimo mese</option>
+              <option value="fiscal_year">Anno fiscale corrente</option>
               <option value="all">Tutto il periodo</option>
             </select>
             <button onclick="setGanttZoom('day')" id="zoom-day" class="gantt-zoom-btn">Giorno</button>
@@ -634,6 +636,31 @@
           <button onclick="saveDocRoot()" style="background:var(--accent);color:#0d0f1a;border:none;border-radius:6px;padding:6px 14px;font-size:0.78rem;font-weight:700;cursor:pointer;">Salva</button>
         </div>
         <button onclick="openDocFolder()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:0.75rem;color:var(--text-muted);cursor:pointer;text-align:left;transition:all 0.15s;" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-muted)'">📂 Apri cartella in Finder</button>
+      </div>
+    </div>
+
+    <div style="border-top:1px solid var(--border);margin:20px 0;"></div>
+
+    <!-- Anno fiscale -->
+    <div>
+      <div style="margin-bottom:10px;"><span class="section-title">📅 Anno fiscale</span></div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <label style="font-size:0.75rem;color:var(--text-muted);">Mese di inizio (usato da "anno fiscale corrente" nei filtri)</label>
+        <select id="fiscal-year-month-select" onchange="saveFiscalYearMonth()"
+                style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:0.78rem;padding:6px 10px;outline:none;">
+          <option value="1">Gennaio (anno solare)</option>
+          <option value="2">Febbraio</option>
+          <option value="3">Marzo</option>
+          <option value="4">Aprile</option>
+          <option value="5">Maggio</option>
+          <option value="6">Giugno</option>
+          <option value="7">Luglio</option>
+          <option value="8">Agosto</option>
+          <option value="9">Settembre</option>
+          <option value="10">Ottobre</option>
+          <option value="11">Novembre</option>
+          <option value="12">Dicembre</option>
+        </select>
       </div>
     </div>
 

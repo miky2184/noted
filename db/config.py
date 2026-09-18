@@ -1,4 +1,5 @@
 import json
+from datetime import date, timedelta
 from pathlib import Path
 
 MODELS = {
@@ -92,6 +93,36 @@ def get_ollama_model() -> str:
 
 def set_ollama_model(model: str) -> None:
     data = _load(); data["ollama_model"] = model; _save(data)
+
+
+def get_fiscal_year_start_month() -> int:
+    """Mese di inizio dell'anno fiscale (1-12). Default 9 (settembre, come in
+    Accenture) — configurabile perché non è universale (altri usano l'anno
+    solare, mese 1)."""
+    return int(_load().get("fiscal_year_start_month", 9))
+
+
+def set_fiscal_year_start_month(month: int) -> None:
+    data = _load()
+    data["fiscal_year_start_month"] = month
+    _save(data)
+
+
+def fiscal_year_bounds(d: date, start_month: int) -> tuple[date, date]:
+    """Inizio/fine dell'anno fiscale che contiene `d`, dato il mese di inizio
+    configurato. Con start_month=1 coincide con l'anno solare — nessun caso
+    speciale: è la stessa formula, solo con l'offset a zero."""
+    if d.month >= start_month:
+        start = date(d.year, start_month, 1)
+        end = date(d.year + 1, start_month, 1) - timedelta(days=1)
+    else:
+        start = date(d.year - 1, start_month, 1)
+        end = date(d.year, start_month, 1) - timedelta(days=1)
+    return start, end
+
+
+def get_current_fiscal_year_bounds() -> tuple[date, date]:
+    return fiscal_year_bounds(date.today(), get_fiscal_year_start_month())
 
 
 def get_favorite_ctx() -> str:

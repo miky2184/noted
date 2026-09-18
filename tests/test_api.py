@@ -882,6 +882,41 @@ def test_gantt_project_delete_unlinks_streams(client):
     assert any(n["content"] == "Release" for n in tagged_notes)
 
 
+def test_fiscal_year_setting_and_board_filter(client):
+    """L'anno fiscale è configurabile (default settembre, come Accenture) e usato
+    dal filtro "scadenze" della board — con mese di inizio 1 (gennaio) coincide
+    con l'anno solare."""
+    from datetime import date, timedelta
+    from db.config import fiscal_year_bounds
+
+    settings = client.get("/api/settings").json()
+    assert settings["fiscal_year_start_month"] == 9
+
+    invalid = client.patch("/api/settings", json={"fiscal_year_start_month": 13})
+    assert invalid.status_code == 400
+
+    ok = client.patch("/api/settings", json={"fiscal_year_start_month": 1})
+    assert ok.status_code == 200
+    assert client.get("/api/settings").json()["fiscal_year_start_month"] == 1
+
+    today = date.today()
+    fy_start, fy_end = fiscal_year_bounds(today, 1)
+    assert fy_start == date(today.year, 1, 1) and fy_end == date(today.year, 12, 31)
+
+    inside = client.post("/api/notes?ctx=work", json={
+        "content": "dentro l'anno fiscale", "status": "todo", "due_date": today.isoformat(),
+    }).json()
+    outside = client.post("/api/notes?ctx=work", json={
+        "content": "fuori dall'anno fiscale", "status": "todo",
+        "due_date": (fy_end + timedelta(days=5)).isoformat(),
+    }).json()
+
+    res = client.get("/api/board?ctx=work&due=fiscal_year")
+    ids = [n["id"] for n in res.json()["todo"]]
+    assert inside["id"] in ids
+    assert outside["id"] not in ids
+
+
 def test_board_filters(client):
     alpha = client.post(
         "/api/notes?ctx=work",

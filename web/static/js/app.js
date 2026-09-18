@@ -1950,7 +1950,19 @@ const GANTT_COLORS = ['#818cf8','#60a5fa','#34d399','#fbbf24','#f87171','#a78bfa
 let ganttSelectedColor = GANTT_COLORS[0];
 let ganttData = null;
 let ganttZoom = 'auto';
-let ganttRange = 'default';   // perimetro visibile: default | week | 2weeks | 3weeks | month | all
+let ganttRange = 'default';   // perimetro visibile: default | week | 2weeks | 3weeks | month | fiscal_year | all
+let _fiscalYearStartMonth = 9;   // 1-12, caricato da /api/settings (v. loadDocRoot)
+
+// Inizio/fine dell'anno fiscale che contiene `d`, dato il mese di inizio
+// configurato — stessa formula del backend (v. db/config.py:fiscal_year_bounds).
+function _fiscalYearBounds(d, startMonth) {
+  const y = d.getFullYear(), m = d.getMonth() + 1;
+  const startYear = m >= startMonth ? y : y - 1;
+  const start = new Date(startYear, startMonth - 1, 1);
+  const end = new Date(startYear + 1, startMonth - 1, 1);
+  end.setDate(end.getDate() - 1);
+  return [start, end];
+}
 let _expandedProjectId = null;   // un solo progetto espanso alla volta nella sidebar
 let _expandedStreamId = null;    // un solo stream espanso alla volta (dentro il progetto espanso)
 let _absencesExpanded = false;
@@ -2726,6 +2738,8 @@ function renderGanttChart(data) {
   if (ganttRange === 'all') {
     startD = new Date(dataMinDate + 'T00:00:00'); startD.setDate(startD.getDate() - 3);
     endD = new Date(dataMaxDate + 'T00:00:00'); endD.setDate(endD.getDate() + 7);
+  } else if (ganttRange === 'fiscal_year') {
+    [startD, endD] = _fiscalYearBounds(_now, _fiscalYearStartMonth);
   } else {
     const RANGE_FORWARD_DAYS = { default: 18, week: 7, '2weeks': 14, '3weeks': 21, month: 30 };
     const fwd = RANGE_FORWARD_DAYS[ganttRange] ?? 18;
@@ -3589,6 +3603,9 @@ async function loadDocRoot() {
     const s = await r.json();
     const inp = document.getElementById('doc-root-input');
     if (inp && s.doc_root) inp.value = s.doc_root;
+    const fySelect = document.getElementById('fiscal-year-month-select');
+    if (fySelect && s.fiscal_year_start_month) fySelect.value = String(s.fiscal_year_start_month);
+    if (s.fiscal_year_start_month) _fiscalYearStartMonth = s.fiscal_year_start_month;
   } catch {}
 }
 
@@ -3602,6 +3619,18 @@ async function saveDocRoot() {
       body: JSON.stringify({ doc_root: val })
     });
     toast('Cartella salvata', 'success');
+  } catch { toast('Errore', 'error'); }
+}
+
+async function saveFiscalYearMonth() {
+  const month = parseInt(document.getElementById('fiscal-year-month-select').value, 10);
+  try {
+    await fetch('/api/settings', {
+      method: 'PATCH',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ fiscal_year_start_month: month })
+    });
+    toast('Anno fiscale aggiornato', 'success');
   } catch { toast('Errore', 'error'); }
 }
 

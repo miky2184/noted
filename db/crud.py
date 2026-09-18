@@ -402,6 +402,10 @@ def _apply_board_filters(
         stmt = stmt.where(Note.due_date == date.today())
     elif due_filter == "week":
         stmt = stmt.where(Note.due_date.isnot(None), Note.due_date >= date.today(), Note.due_date <= date.today() + timedelta(days=7))
+    elif due_filter == "fiscal_year":
+        from db.config import get_current_fiscal_year_bounds
+        fy_start, fy_end = get_current_fiscal_year_bounds()
+        stmt = stmt.where(Note.due_date.isnot(None), Note.due_date >= fy_start, Note.due_date <= fy_end)
     return stmt
 
 

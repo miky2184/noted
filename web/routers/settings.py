@@ -11,8 +11,8 @@ router = APIRouter()
 
 @router.get("/api/settings")
 async def api_get_settings():
-    from db.config import get_doc_root
-    return {"doc_root": get_doc_root()}
+    from db.config import get_doc_root, get_fiscal_year_start_month
+    return {"doc_root": get_doc_root(), "fiscal_year_start_month": get_fiscal_year_start_month()}
 
 
 @router.get("/api/settings/token")
@@ -48,13 +48,18 @@ async def api_set_favorite_ctx(body: FavoriteCtxUpdate):
 
 class SettingsUpdate(BaseModel):
     doc_root: Optional[str] = None
+    fiscal_year_start_month: Optional[int] = None
 
 
 @router.patch("/api/settings", status_code=200)
 async def api_update_settings(body: SettingsUpdate):
-    from db.config import set_doc_root
+    from db.config import set_doc_root, set_fiscal_year_start_month
     if body.doc_root is not None:
         set_doc_root(body.doc_root.strip())
+    if body.fiscal_year_start_month is not None:
+        if not 1 <= body.fiscal_year_start_month <= 12:
+            raise HTTPException(status_code=400, detail="Mese non valido (1-12)")
+        set_fiscal_year_start_month(body.fiscal_year_start_month)
     return {"ok": True}
 
 # ── Config ────────────────────────────────────────────────────────────────────
