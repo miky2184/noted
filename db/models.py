@@ -28,10 +28,16 @@ class Note(SQLModel, table=True):
     sort_order: int = Field(default=0)
     created_at: datetime = Field(default_factory=datetime.now, index=True)
     updated_at: datetime = Field(default_factory=datetime.now)
-    # Nome legacy: la tabella/concetto "Milestone" è stata rinominata "Stream" (v. Stream),
-    # ma questa colonna mantiene il nome fisico originale per evitare di toccare la tabella
-    # note via Alembic batch mode, che ricrea la tabella e con essa i trigger FTS5.
-    milestone_id: Optional[int] = Field(default=None, foreign_key="stream.id")
+    # Nome legacy: la colonna si chiamava "milestone_id" quando puntava allo Stream
+    # (poi rinominato da Milestone); ora punta alla Fase (Phase) dentro lo Stream —
+    # mantiene il nome fisico originale per evitare di toccare la tabella note via
+    # Alembic batch mode, che ricrea la tabella e con essa i trigger FTS5.
+    milestone_id: Optional[int] = Field(default=None, foreign_key="phase.id")
+    # Aggancio diretto a uno Stream, senza passare da una Fase — per lavoro
+    # semplice che non merita una scomposizione in fasi (es. "attività extra"):
+    # la nota stessa fa da "fase" nel Gantt, con le sue date. Mutuamente
+    # esclusivo con milestone_id (impostare l'uno azzera l'altro, v. edit_note).
+    stream_id: Optional[int] = Field(default=None, foreign_key="stream.id")
     # Bozza email generata dall'AI a partire da questa nota — salvata così un
     # secondo clic sul pulsante ✉️ mostra la bozza esistente invece di
     # richiamare l'AI da capo (che resta usata solo per generarla la prima
@@ -86,15 +92,33 @@ class GanttProject(SQLModel, table=True):
 
 
 class Stream(SQLModel, table=True):
-    """Uno "Stream" di lavoro dentro un GanttProject: nome + date opzionali (appare come
-    barra sulla timeline solo se entrambe le date sono valorizzate). Raggruppa N Note e ne
-    calcola il progress. Diretto figlio del progetto — nessuna nidificazione ulteriore."""
+    """Uno "Stream" di lavoro dentro un GanttProject, diretto figlio del progetto.
+    Raggruppa N Fasi (Phase), ciascuna con le proprie date. Ha anche proprie
+    start_date/end_date, ma sono "di riserva": se lo Stream ha almeno una Fase,
+    nel Gantt vince l'aggregato (min/max tra le date delle Fasi, v.
+    crud._stream_data) — le date qui salvate contano solo per uno Stream senza
+    Fasi, per poterlo comunque piazzare sulla timeline senza doverne creare una."""
     id: Optional[int] = Field(default=None, primary_key=True)
     project_id: int = Field(foreign_key="ganttproject.id")
     name: str
     start_date: Optional[date] = None
     end_date: Optional[date] = None
+    created_at: datetime = Field(default_factory=datetime.now)
+
+
+class Phase(SQLModel, table=True):
+    """Una fase di lavoro dentro uno Stream (es. Analisi e Requisiti, Implementazione,
+    UAT): nome + date opzionali (appare come barra sulla timeline solo se entrambe le
+    date sono valorizzate). Raggruppa N Note (Note.milestone_id) e ne calcola il
+    progress — è l'unico livello a cui le note si agganciano per avere una collocazione
+    temporale nel Gantt."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    stream_id: int = Field(foreign_key="stream.id")
+    name: str
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
     note_id: Optional[int] = Field(default=None, foreign_key="note.id")
+    sort_order: int = Field(default=0)
     created_at: datetime = Field(default_factory=datetime.now)
 
 

@@ -744,10 +744,14 @@ function _noteCardHtml(n, today) {
   const projHtml = n.project
     ? `<span class="project-badge" onclick="editProject(this,${n.id},'${escHtml(n.project)}')" title="Modifica progetto">${escHtml(n.project)}</span>`
     : `<span class="project-badge project-empty" onclick="editProject(this,${n.id},'')" title="Aggiungi progetto">+progetto</span>`;
-  const msHtml = n.milestone_id
-    ? `<span class="milestone-badge" onclick="editNoteStream(event,${n.id},${n.milestone_id},'${escHtml(n.project||'')}')">🏁 stream#${n.milestone_id}</span>`
+  // Una nota si aggancia o a una Fase (milestone_id) o direttamente a uno
+  // Stream (stream_id, per lavoro semplice che non merita una scomposizione
+  // in fasi) — mai entrambi, v. edit_note lato backend.
+  const currentLinkKey = n.milestone_id ? `phase:${n.milestone_id}` : (n.stream_id ? `stream:${n.stream_id}` : '');
+  const msHtml = currentLinkKey
+    ? `<span class="milestone-badge" onclick="editNoteStream(event,${n.id},'${currentLinkKey}','${escHtml(n.project||'')}')">🏁 ${n.milestone_id ? 'fase#'+n.milestone_id : 'stream#'+n.stream_id}</span>`
     : (n.project
-       ? `<span class="milestone-badge milestone-empty" onclick="editNoteStream(event,${n.id},null,'${escHtml(n.project||'')}')">+ stream</span>`
+       ? `<span class="milestone-badge milestone-empty" onclick="editNoteStream(event,${n.id},'','${escHtml(n.project||'')}')">+ fase</span>`
        : '');
   const assigneeHtml = _renderAssigneeBadges(n.assignee, n.id);
   return `
@@ -1104,7 +1108,7 @@ document.getElementById('add-form').addEventListener('submit', async e => {
         start_date: document.getElementById('note-start').value || null,
         due_date: document.getElementById('note-due').value || null,
         status: document.getElementById('note-status').value || null,
-        milestone_id: _resolveStreamId(document.getElementById('note-stream').value),
+        ..._resolveStreamLink(document.getElementById('note-stream').value),
       })
     });
     if (!res.ok) throw new Error();
@@ -1149,9 +1153,17 @@ async function deleteNote(id) {
 // ── Inline edit ──────────────────────────────────────────────────────────────
 const STATUS_CYCLE = [null, 'backlog', 'todo', 'discuss', 'wip', 'waiting', 'blocked', 'done'];
 
+// .textContent ignora i confini di blocco (<div>/<br>) che il browser crea
+// incollando testo multi-riga o con Maiusc+Invio in un contenteditable —
+// risultato: tutto finisce su una riga sola. .innerText rispetta invece il
+// rendering (va a capo dove il testo lo mostra), quindi preserva le righe.
+function _editableText(el) {
+  return (el.innerText !== undefined ? el.innerText : el.textContent).trim();
+}
+
 function startEdit(el, noteId) {
   if (el.contentEditable === 'true') return;
-  const original = el.textContent;
+  const original = _editableText(el);
   el.contentEditable = 'true';
   el.focus();
 
@@ -1163,9 +1175,17 @@ function startEdit(el, noteId) {
   sel.removeAllRanges();
   sel.addRange(range);
 
+  // Incolla come testo semplice preservando gli a capo (niente formattazione
+  // rich-text, niente <div> annidati che comunque textContent perderebbe).
+  el.onpaste = e => {
+    e.preventDefault();
+    const text = (e.clipboardData || window.clipboardData).getData('text/plain');
+    document.execCommand('insertText', false, text);
+  };
+
   async function save() {
     el.contentEditable = 'false';
-    const newContent = el.textContent.trim();
+    const newContent = _editableText(el);
     if (!newContent || newContent === original) { el.textContent = original; return; }
     try {
       const mentions = _extractMentions(newContent);
@@ -1540,6 +1560,7 @@ async function loadBoard() {
   const cliente = document.getElementById('board-cliente-filter').value.trim();
   const tag = document.getElementById('board-tag-filter').value.trim().replace(/^#/, '');
   const project = document.getElementById('board-project-filter').value.trim();
+  const phaseLink = _resolveStreamLink(document.getElementById('board-phase-filter').value);
   const assignee = document.getElementById('board-assignee-filter').value.trim();
   const priority = document.getElementById('board-priority-filter').value;
   const due = document.getElementById('board-due-filter').value;
@@ -1552,6 +1573,8 @@ async function loadBoard() {
   if (cliente) params.set('cliente', cliente);
   if (tag) params.set('tag', tag);
   if (project) params.set('project', project);
+  if (phaseLink.milestone_id) params.set('milestone_id', phaseLink.milestone_id);
+  if (phaseLink.stream_id) params.set('stream_id', phaseLink.stream_id);
   if (assignee) params.set('assignee', assignee);
   if (priority) params.set('priority', priority);
   if (due) params.set('due', due);
@@ -1571,6 +1594,7 @@ function clearBoardFilters() {
   document.getElementById('board-cliente-filter').value = '';
   document.getElementById('board-tag-filter').value = '';
   document.getElementById('board-project-filter').value = '';
+  document.getElementById('board-phase-filter').value = '';
   document.getElementById('board-assignee-filter').value = '';
   document.getElementById('board-priority-filter').value = '';
   document.getElementById('board-due-filter').value = '';
@@ -1928,6 +1952,7 @@ let ganttData = null;
 let ganttZoom = 'auto';
 let ganttRange = 'default';   // perimetro visibile: default | week | 2weeks | 3weeks | month | all
 let _expandedProjectId = null;   // un solo progetto espanso alla volta nella sidebar
+let _expandedStreamId = null;    // un solo stream espanso alla volta (dentro il progetto espanso)
 let _absencesExpanded = false;
 let ganttAbsenceSelectedColor = null;   // null = colore automatico dal nome (personColor)
 
@@ -1935,6 +1960,62 @@ function personColor(name) {
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
   return GANTT_COLORS[hash % GANTT_COLORS.length];
+}
+
+function _hexToHsl(hex) {
+  const c = (hex || '').replace('#', '');
+  const r = parseInt(c.substr(0, 2), 16) / 255, g = parseInt(c.substr(2, 2), 16) / 255, b = parseInt(c.substr(4, 2), 16) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h, s, l = (max + min) / 2;
+  if (max === min) { h = s = 0; }
+  else {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+      case g: h = (b - r) / d + 2; break;
+      default: h = (r - g) / d + 4;
+    }
+    h /= 6;
+  }
+  return [h * 360, s * 100, l * 100];
+}
+
+function _hslToHex(h, s, l) {
+  h /= 360; s /= 100; l /= 100;
+  let r, g, b;
+  if (s === 0) { r = g = b = l; }
+  else {
+    const hue2rgb = (p, q, t) => {
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1/6) return p + (q - p) * 6 * t;
+      if (t < 1/2) return q;
+      if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+      return p;
+    };
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    r = hue2rgb(p, q, h + 1/3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1/3);
+  }
+  const toHex = x => Math.round(x * 255).toString(16).padStart(2, '0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+// Colore di uno Stream: stessa tinta (hue) del cliente/progetto, ma con una
+// gradazione di luminosità diversa per ciascuno Stream — restano riconoscibili
+// come "famiglia" dello stesso progetto ma distinguibili tra loro a colpo
+// d'occhio. Le Fasi dentro uno Stream ereditano semplicemente questo colore.
+function _streamColor(baseHex, index, total) {
+  if (total <= 1) return baseHex;
+  const [h, s, l] = _hexToHsl(baseHex);
+  const spread = 28;
+  const minL = Math.max(28, l - spread / 2);
+  const maxL = Math.min(74, l + spread / 2);
+  const newL = minL + (maxL - minL) * (index / (total - 1));
+  return _hslToHex(h, Math.min(92, s + 8), newL);
 }
 
 // Testo bianco o scuro a seconda della luminanza del colore, per garantire leggibilità
@@ -1957,6 +2038,26 @@ function setGanttZoom(z) {
 function setGanttRange(r) {
   ganttRange = r;
   if (ganttData) renderGanttChart(ganttData);
+}
+
+// Stampa/esporta PDF del Gantt: forza il perimetro "Tutto il periodo" (altrimenti
+// si stamperebbe solo la finestra corrente di pochi giorni/settimane) e apre la
+// finestra di stampa del browser — landscape e "un cliente per pagina" sono
+// gestiti in CSS (vedi @media print in app.css), qui basta assicurarsi di essere
+// sulla tab Gantt col perimetro giusto prima di invocare window.print().
+async function printGantt() {
+  if (activeTab !== 'gantt') switchTab('gantt');
+  const prevRange = ganttRange;
+  if (ganttData && ganttRange !== 'all') {
+    ganttRange = 'all';
+    renderGanttChart(ganttData);
+    await new Promise(r => setTimeout(r, 50));
+  }
+  window.print();
+  if (prevRange !== 'all') {
+    ganttRange = prevRange;
+    if (ganttData) renderGanttChart(ganttData);
+  }
 }
 
 (function initColorPicker() {
@@ -1982,29 +2083,67 @@ async function loadGantt() {
     renderGanttPanel(ganttData);
     renderGanttChart(ganttData);
     loadStreamDatalist();
+    loadClientProjectsDatalist();
   } catch(e) { console.error(e); }
 }
 
-// ── Stream search (campo "stream" nel form nota) ──────────────────────────────
-let _streamLabelToId = {};
+// ── Stream/Fase search (campo "fase" nel form nota) ────────────────────────────
+// Una nota si aggancia o a una Fase specifica, o direttamente a uno Stream
+// (lavoro semplice che non merita una scomposizione in fasi — la nota stessa
+// fa da "fase"): la chiave è prefissata "phase:"/"stream:" per distinguerle.
+let _streamLabelToKey = {};
 
 async function loadStreamDatalist() {
   try {
     const res = await apiFetch('/api/gantt/streams/all');
     const data = await res.json();
-    _streamLabelToId = {};
+    _streamLabelToKey = {};
     const list = document.getElementById('stream-datalist');
     if (!list) return;
     list.innerHTML = data.streams.map(s => {
-      _streamLabelToId[s.label] = s.id;
+      _streamLabelToKey[s.label] = s.key;
       return `<option value="${escHtml(s.label)}"></option>`;
     }).join('');
   } catch {}
 }
 
-function _resolveStreamId(text) {
+function _resolveStreamLink(text) {
   const t = (text || '').trim();
-  return t && _streamLabelToId[t] ? _streamLabelToId[t] : null;
+  const key = t && _streamLabelToKey[t];
+  if (!key) return { milestone_id: null, stream_id: null };
+  const [kind, idStr] = key.split(':');
+  const id = parseInt(idStr, 10);
+  return kind === 'stream' ? { milestone_id: null, stream_id: id } : { milestone_id: id, stream_id: null };
+}
+
+// ── Cliente/progetto autocomplete (form nota) ──────────────────────────────────
+// Il campo "progetto" suggerisce, mentre scrivi (o al focus), solo i progetti
+// del cliente già inserito — evita di riscrivere nomi lunghi. Se il cliente è
+// vuoto o non riconosciuto, si vedono tutti i progetti noti (nessun filtro).
+let _allClientProjects = [];
+
+async function loadClientProjectsDatalist() {
+  try {
+    const res = await apiFetch('/api/gantt/client-projects');
+    _allClientProjects = await res.json();
+    const clienteList = document.getElementById('cliente-datalist');
+    if (clienteList) {
+      const clientNames = [...new Set(_allClientProjects.map(p => p.client_name).filter(Boolean))].sort();
+      clienteList.innerHTML = clientNames.map(c => `<option value="${escHtml(c)}"></option>`).join('');
+    }
+    _refreshProjectDatalist();
+  } catch {}
+}
+
+function _refreshProjectDatalist() {
+  const list = document.getElementById('project-datalist');
+  if (!list) return;
+  const cliente = (document.getElementById('note-cliente')?.value || '').trim().toLowerCase();
+  const matches = cliente
+    ? _allClientProjects.filter(p => (p.client_name || '').toLowerCase() === cliente)
+    : _allClientProjects;
+  const names = [...new Set(matches.map(p => p.name))].sort();
+  list.innerHTML = names.map(n => `<option value="${escHtml(n)}"></option>`).join('');
 }
 
 function toggleAbsencesSection() {
@@ -2101,7 +2240,7 @@ function renderAbsencesSection(data) {
     <button class="gantt-add-ms-btn" onclick="toggleAddAbsenceForm(this)">+ assenza</button>
     <form class="gantt-add-ms-form" id="gantt-absence-form" onsubmit="addAbsence(event)">
       <input class="gantt-input" name="person" placeholder="Nome persona" maxlength="80" required style="font-size:0.75rem;padding:3px 7px;">
-      <div style="display:flex;gap:4px;">
+      <div style="display:flex;flex-direction:column;gap:4px;">
         <input class="gantt-input" type="date" name="start" required style="font-size:0.75rem;padding:3px 7px;">
         <input class="gantt-input" type="date" name="end" required style="font-size:0.75rem;padding:3px 7px;">
       </div>
@@ -2146,23 +2285,103 @@ async function deleteAbsence(id) {
   } catch { toast('Errore eliminazione', 'error'); }
 }
 
-function _renderStreamItem(s, color) {
-  const dates = (s.start_date && s.end_date) ? `<span class="gantt-ms-dates">${s.start_date} → ${s.end_date}</span>`
+function _renderPhaseItem(ph, color) {
+  const dates = (ph.start_date && ph.end_date) ? `<span class="gantt-ms-dates">${ph.start_date} → ${ph.end_date}</span>`
               : `<span class="gantt-ms-dates" style="font-style:italic;">senza date</span>`;
+  // Una nota agganciata direttamente allo Stream si presenta come una fase,
+  // ma non è una Fase vera: click apre la nota (non l'editor fase) e non è
+  // "eliminabile" da qui — si scollega dalla nota stessa (badge 🏁 nel form).
+  if (ph.is_note) {
+    const doneStyle = ph.status === 'done' ? 'opacity:0.55;text-decoration:line-through' : '';
+    return `
+      <div class="gantt-ms-item" onclick="goToNote(event,'${ph.created_at}',${ph.note_id})" title="Nota collegata direttamente allo stream — clicca per aprirla">
+        <span style="width:6px;height:6px;border-radius:50%;background:${color};flex-shrink:0;display:inline-block;margin-top:4px;opacity:0.65;"></span>
+        <div class="gantt-ms-body" style="${doneStyle}">
+          <span>📝 ${ph.status === 'done' ? '✅ ' : ''}${escHtml(ph.name)}</span>
+          ${dates}
+        </div>
+      </div>`;
+  }
   return `
-    <div class="gantt-ms-item" data-mid="${s.id}" onclick="editGanttStream(${s.id})" title="Clicca per modificare nome/date">
+    <div class="gantt-ms-item" data-pid="${ph.id}" onclick="editGanttPhase(${ph.id})" title="Clicca per modificare nome/date">
+      <span style="width:6px;height:6px;border-radius:50%;background:${color};flex-shrink:0;display:inline-block;margin-top:4px;opacity:0.65;"></span>
+      <div class="gantt-ms-body">
+        <span>🏁 ${escHtml(ph.name)}</span>
+        ${dates}
+        ${ph.linked_notes && ph.linked_notes.length ? `<span style="font-size:0.62rem;background:var(--accent-dim);color:var(--accent);border-radius:4px;padding:1px 5px;margin-left:4px;">📎 ${ph.linked_notes.length}</span>` : ''}
+      </div>
+      <button class="gantt-ms-del" onclick="event.stopPropagation();deletePhase(${ph.id},event)" title="Elimina">✕</button>
+    </div>`;
+}
+
+function toggleStreamExpand(id) {
+  _expandedStreamId = (_expandedStreamId === id) ? null : id;
+  renderGanttPanel(ganttData);
+}
+
+function _renderStreamItem(s, color) {
+  const expanded = s.id === _expandedStreamId;
+  const phases = s.phases || [];
+  const totalLinked = phases.reduce((sum, ph) => sum + ((ph.linked_notes || []).length), 0);
+  // Con Fasi, le date sono l'aggregato min/max calcolato dal backend (v.
+  // crud._stream_data) — qui solo mostrate, non modificabili direttamente;
+  // senza Fasi, sono le date "proprie" dello Stream, modificabili sotto.
+  const dateSummary = (s.start_date && s.end_date) ? ` · ${s.start_date} → ${s.end_date}` : '';
+  const summary = phases.length
+    ? `<span class="gantt-ms-dates">${phases.length} fas${phases.length===1?'e':'i'} · ${s.progress}%${dateSummary}</span>`
+    : (dateSummary
+        ? `<span class="gantt-ms-dates">${s.start_date} → ${s.end_date}</span>`
+        : `<span class="gantt-ms-dates" style="font-style:italic;">nessuna fase</span>`);
+  const periodRow = (!phases.length) ? `
+    <div style="display:flex;gap:4px;align-items:center;padding:2px 0 8px;" onclick="event.stopPropagation()">
+      <span style="font-size:0.68rem;color:var(--text-dim);flex-shrink:0;">Periodo:</span>
+      <input class="gantt-input" type="date" value="${s.start_date || ''}" onchange="setStreamDate(${s.id},'start_date',this.value)" style="font-size:0.68rem;padding:2px 3px;width:auto;min-width:0;flex:1;">
+      <span style="color:var(--text-dim);flex-shrink:0;">→</span>
+      <input class="gantt-input" type="date" value="${s.end_date || ''}" onchange="setStreamDate(${s.id},'end_date',this.value)" style="font-size:0.68rem;padding:2px 3px;width:auto;min-width:0;flex:1;">
+    </div>` : `
+    <div style="font-size:0.66rem;color:var(--text-dim);font-style:italic;padding:2px 0 8px;">Periodo calcolato dalle fasi (min/max)</div>`;
+  const streamBody = expanded ? `
+    <div style="padding-left:14px;">
+      <input class="gantt-input" value="${escHtml(s.name)}" onclick="event.stopPropagation()"
+             onchange="renameStream(${s.id},this.value)" maxlength="80"
+             style="font-size:0.75rem;padding:3px 7px;width:100%;margin:2px 0 6px;">
+      ${periodRow}
+      <div class="gantt-milestones-list">
+        ${phases.map(ph => _renderPhaseItem(ph, color)).join('') || `<div style="color:var(--text-dim);font-size:0.7rem;padding:2px 0 6px">Nessuna fase.</div>`}
+      </div>
+      <div style="display:flex;gap:4px;">
+        <button class="gantt-add-ms-btn" onclick="event.stopPropagation();toggleAddPhase(${s.id},this)">+ fase</button>
+        <button class="gantt-add-ms-btn" onclick="event.stopPropagation();addStandardPhases(${s.id})" title="Crea Analisi e Requisiti / Implementazione / UAT / Rilascio in PROD in un click">+ fasi standard</button>
+      </div>
+      <form class="gantt-add-ms-form" id="gantt-phase-form-${s.id}" onsubmit="addPhase(event,${s.id})" onclick="event.stopPropagation()">
+        <input class="gantt-input" name="name" placeholder="Nome fase" maxlength="80" required style="font-size:0.75rem;padding:3px 7px;">
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <input class="gantt-input" type="date" name="start" style="font-size:0.75rem;padding:3px 7px;">
+          <input class="gantt-input" type="date" name="end" style="font-size:0.75rem;padding:3px 7px;">
+        </div>
+        <div style="display:flex;gap:4px;">
+          <button type="submit" class="gantt-btn-sm">Aggiungi</button>
+          <button type="button" class="gantt-btn-sm" onclick="toggleAddPhase(${s.id})">Annulla</button>
+        </div>
+      </form>
+    </div>` : '';
+  return `
+    <div class="gantt-ms-item" data-mid="${s.id}" onclick="toggleStreamExpand(${s.id})" title="Clicca per espandere">
+      <span style="font-size:0.55rem;color:var(--text-dim);width:8px;flex-shrink:0;">${expanded ? '▼' : '▶'}</span>
       <span style="width:6px;height:6px;border-radius:50%;background:${color};flex-shrink:0;display:inline-block;margin-top:4px"></span>
       <div class="gantt-ms-body">
-        <span>🏁 ${escHtml(s.name)}</span>
-        ${dates}
-        ${s.linked_notes && s.linked_notes.length ? `<span style="font-size:0.62rem;background:var(--accent-dim);color:var(--accent);border-radius:4px;padding:1px 5px;margin-left:4px;">📎 ${s.linked_notes.length}</span>` : ''}
+        <span>${escHtml(s.name)}</span>
+        ${summary}
+        ${totalLinked ? `<span style="font-size:0.62rem;background:var(--accent-dim);color:var(--accent);border-radius:4px;padding:1px 5px;margin-left:4px;">📎 ${totalLinked}</span>` : ''}
       </div>
       <button class="gantt-ms-del" onclick="event.stopPropagation();deleteStream(${s.id},event)" title="Elimina">✕</button>
-    </div>`;
+    </div>
+    ${streamBody}`;
 }
 
 function toggleProjectExpand(id) {
   _expandedProjectId = (_expandedProjectId === id) ? null : id;
+  _expandedStreamId = null;
   renderGanttPanel(ganttData);
 }
 
@@ -2189,12 +2408,13 @@ function _renderProjectItem(p, clients) {
         <input class="gantt-input" type="date" value="${p.end_date || ''}" onchange="setProjectDate(${p.id},'end_date',this.value)" style="font-size:0.68rem;padding:2px 3px;width:auto;min-width:0;flex:1;">
       </div>` : ''}
       <div class="gantt-milestones-list">
-        ${(p.streams || []).map(s => _renderStreamItem(s, p.color)).join('') || `<div style="color:var(--text-dim);font-size:0.72rem;padding:2px 0 6px">Nessuno stream.</div>`}
+        ${(p.streams || []).map((s, i) => _renderStreamItem(s, _streamColor(p.color, i, (p.streams || []).length))).join('') || `<div style="color:var(--text-dim);font-size:0.72rem;padding:2px 0 6px">Nessuno stream.</div>`}
       </div>
       <button class="gantt-add-ms-btn" onclick="toggleAddStream(${p.id},this)">+ stream</button>
       <form class="gantt-add-ms-form" id="gantt-stream-form-${p.id}" onsubmit="addStream(event,${p.id})">
         <input class="gantt-input" name="name" placeholder="Nome stream" maxlength="80" required style="font-size:0.75rem;padding:3px 7px;">
-        <div style="display:flex;gap:4px;">
+        <div style="font-size:0.62rem;color:var(--text-dim);">Periodo (opzionale, solo se non prevedi fasi):</div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
           <input class="gantt-input" type="date" name="start" style="font-size:0.75rem;padding:3px 7px;">
           <input class="gantt-input" type="date" name="end" style="font-size:0.75rem;padding:3px 7px;">
         </div>
@@ -2228,6 +2448,9 @@ function renderGanttPanel(data) {
   }
   if (_expandedProjectId && !data.projects.some(p => p.id === _expandedProjectId)) {
     _expandedProjectId = null;
+  }
+  if (_expandedStreamId && !data.projects.some(p => (p.streams || []).some(s => s.id === _expandedStreamId))) {
+    _expandedStreamId = null;
   }
   const list = document.getElementById('gantt-projects-list');
 
@@ -2323,12 +2546,15 @@ async function addStream(e, projectId) {
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({project_id: projectId, name, start_date: start || null, end_date: end || null}),
     });
-    if (!res.ok) throw new Error();
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Errore');
+    }
     form.reset();
     form.classList.remove('open');
     toast('Stream aggiunto', 'success');
     await loadGantt();
-  } catch { toast('Errore', 'error'); }
+  } catch(err) { toast(err.message || 'Errore', 'error'); }
 }
 
 async function deleteStream(id, e) {
@@ -2341,11 +2567,117 @@ async function deleteStream(id, e) {
   } catch { toast('Errore eliminazione', 'error'); }
 }
 
-// Stream con entrambe le date — solo questi possono comparire come barre
-// sulla timeline (uno Stream senza date esiste comunque come contenitore
-// di note, visibile solo nel pannello laterale).
+async function renameStream(id, name) {
+  name = name.trim();
+  if (!name) return;
+  try {
+    const res = await apiFetch(`/api/gantt/streams/${id}`, {
+      method: 'PATCH',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({name}),
+    });
+    if (!res.ok) throw new Error();
+    await loadGantt();
+  } catch { toast('Errore rinomina', 'error'); }
+}
+
+async function setStreamDate(id, field, value) {
+  try {
+    const res = await apiFetch(`/api/gantt/streams/${id}`, {
+      method: 'PATCH',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ [field]: value || '' }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Errore');
+    }
+    await loadGantt();
+  } catch(err) { toast(err.message || 'Errore', 'error'); }
+}
+
+function toggleAddPhase(streamId, btn) {
+  const form = document.getElementById(`gantt-phase-form-${streamId}`);
+  form.classList.toggle('open');
+}
+
+async function addPhase(e, streamId) {
+  e.preventDefault();
+  e.stopPropagation();
+  const form = e.target;
+  const name = form.name.value.trim();
+  if (!name) return;
+  const start = form.start ? form.start.value : '';
+  const end = form.end ? form.end.value : '';
+  try {
+    const res = await apiFetch('/api/gantt/phases', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({stream_id: streamId, name, start_date: start || null, end_date: end || null}),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Errore');
+    }
+    form.reset();
+    form.classList.remove('open');
+    toast('Fase aggiunta', 'success');
+    await loadGantt();
+  } catch(err) { toast(err.message || 'Errore', 'error'); }
+}
+
+async function addStandardPhases(streamId) {
+  try {
+    const res = await apiFetch('/api/gantt/phases/standard', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({stream_id: streamId}),
+    });
+    if (!res.ok) throw new Error();
+    toast('Fasi standard create', 'success');
+    await loadGantt();
+  } catch { toast('Errore', 'error'); }
+}
+
+async function deletePhase(id, e) {
+  e.stopPropagation();
+  try {
+    const res = await apiFetch(`/api/gantt/phases/${id}`, {method:'DELETE'});
+    if (!res.ok) throw new Error();
+    toast('Fase eliminata');
+    await loadGantt();
+  } catch { toast('Errore eliminazione', 'error'); }
+}
+
+// Fasi con entrambe le date, appiattite su tutti gli Stream del progetto —
+// solo queste possono comparire come barre sulla timeline (una Fase senza
+// date esiste comunque come contenitore di note, visibile solo nel pannello
+// laterale). Ritorna i riferimenti reali (non copie): serve perché altrove si
+// annotano flag come _atRisk direttamente sull'oggetto, e devono persistere
+// tra chiamate multiple nello stesso render.
 function _datedStreams(p) {
-  return (p.streams || []).filter(s => s.start_date && s.end_date);
+  const result = [];
+  for (const s of (p.streams || [])) {
+    const phases = s.phases || [];
+    for (const ph of phases) {
+      if (ph.start_date && ph.end_date) {
+        ph._streamId = s.id;
+        ph._streamName = s.name;
+        result.push(ph);
+      }
+    }
+    // Uno Stream senza Fasi ma con date proprie (v. crud._stream_data) non ha
+    // righe-fase da disegnare, ma le sue date devono comunque contare per il
+    // range/ordinamento a livello di progetto — voce sintetica, marcata per
+    // essere esclusa dal render come riga-fase (v. _isStreamOnly più sotto).
+    if (!phases.length && s.start_date && s.end_date) {
+      result.push({
+        id: `stream-${s.id}`, name: s.name, start_date: s.start_date, end_date: s.end_date,
+        _streamId: s.id, _streamName: s.name, _isStreamOnly: true, linked_notes: [],
+      });
+    }
+  }
+  return result;
 }
 
 function renderGanttChart(data) {
@@ -2423,7 +2755,7 @@ function renderGanttChart(data) {
     for (const m of _datedStreams(p)) {
       m._atRisk = p.has_risk_blocker && m.end_date >= todayStr && m.end_date <= warnCutoff;
       m._overdue = m.end_date < todayStr;
-      if (m._atRisk) atRiskList.push({ project: p.name, stream: m.name, end: m.end_date });
+      if (m._atRisk) atRiskList.push({ project: p.name, stream: m._isStreamOnly ? m.name : `${m._streamName} · ${m.name}`, end: m.end_date });
     }
   }
 
@@ -2583,8 +2915,18 @@ function renderGanttChart(data) {
   });
 
   // Build rows (assenze in cima, poi progetti normali)
+  // In stampa, ogni cliente deve stare su una pagina propria (vedi
+  // .gantt-client-page in app.css): i progetti sono già ordinati per cliente,
+  // quindi basta aprire un nuovo wrapper quando il client_id cambia.
   let rowsHtml = absenceRowsHtml;
+  let _lastClientKey;
   for (const p of chartProjects) {
+    const clientKey = p.client_id || 'none';
+    if (clientKey !== _lastClientKey) {
+      if (_lastClientKey !== undefined) rowsHtml += `</div>`;
+      rowsHtml += `<div class="gantt-client-page">`;
+      _lastClientKey = clientKey;
+    }
     const datedMs = _rangeDatedStreams(p);
     const projectLabel = p.client_name ? `${escHtml(p.client_name)} - ${escHtml(p.name)}` : escHtml(p.name);
     // Il periodo del progetto (se impostato) racchiude visivamente i suoi
@@ -2604,66 +2946,117 @@ function renderGanttChart(data) {
       <div class="gantt-row-track" style="height:${hasProjectPeriod ? '10px' : '4px'};"><div class="gantt-track-bg" style="opacity:0.3"></div>${todayLine}${projectBarHtml}</div>
     </div>`;
 
-    // Milestone rows (solo quelle con entrambe le date — le altre restano
-    // visibili solo nel pannello laterale, vedi _datedStreams)
-    for (const m of datedMs) {
-      const barLeft = pct(m.start_date);
-      const barRight = pct(m.end_date);
-      const barWidth = Math.max(parseFloat(barRight) - parseFloat(barLeft), oneDayPct).toFixed(2);
-      const riskBadge = m._atRisk ? ' ⚠️' : '';
-      const riskStyle = m._atRisk
-        ? `outline: 2px solid var(--yellow); outline-offset: 1px;`
-        : m._overdue ? `opacity:0.6;` : '';
-      const labelStyle = m._atRisk ? 'color:var(--yellow);font-weight:600;' : '';
+    // Righe Stream: ogni Stream del progetto compare come intestazione (anche
+    // senza fasi datate in perimetro — stesso criterio "sempre visibile" già
+    // usato per i progetti, un livello più in basso), con sotto una riga per
+    // ciascuna delle sue fasi datate in perimetro (le altre fasi restano
+    // visibili solo nel pannello laterale).
+    const phasesByStream = new Map();
+    for (const ph of datedMs) {
+      if (!phasesByStream.has(ph._streamId)) phasesByStream.set(ph._streamId, []);
+      phasesByStream.get(ph._streamId).push(ph);
+    }
+    const _projStreams = p.streams || [];
+    _projStreams.forEach((s, streamIdx) => {
+      const sColor = _streamColor(p.color, streamIdx, _projStreams.length);
+      // Date effettive dello Stream, già calcolate dal backend: aggregato
+      // min/max delle sue Fasi se ne ha, altrimenti le date proprie dello
+      // Stream (v. crud._stream_data) — sempre mostrate quando presenti, non
+      // solo con più di una fase: uno Stream senza fasi non avrebbe
+      // altrimenti alcuna barra propria sulla timeline.
+      const streamPhases = (phasesByStream.get(s.id) || []).filter(ph => !ph._isStreamOnly);
+      let streamBarHtml = '';
+      if (s.start_date && s.end_date && _inRange(s.start_date, s.end_date)) {
+        const sLeft = pct(s.start_date);
+        const sEndExcl = new Date(s.end_date + 'T00:00:00'); sEndExcl.setDate(sEndExcl.getDate()+1);
+        const sWidth = Math.max(parseFloat(pct(_lds(sEndExcl))) - parseFloat(sLeft), oneDayPct).toFixed(2);
+        // Lo Stream si distingue dalle sue Fasi sottostanti con un riempimento
+        // pieno (le Fasi invece restano a solo bordo, v. sotto).
+        streamBarHtml = `<div class="gantt-project-bar" style="left:${sLeft}%;width:${sWidth}%;background:${sColor};border:none;opacity:0.45;" title="${escHtml(s.name)}: ${s.start_date} → ${s.end_date}"></div>`;
+      }
       rowsHtml += `
-      <div class="gantt-row">
-        <div class="gantt-row-label" title="${escHtml(m.name)}" style="${labelStyle}">${escHtml(m.name)}${riskBadge}</div>
-        <div class="gantt-row-track">
-          <div class="gantt-track-bg"></div>
-          ${todayLine}
-          <div class="gantt-bar" style="left:${barLeft}%;width:${barWidth}%;background:${p.color};${riskStyle}" title="${m.start_date} → ${m.end_date}">
-            <span class="gantt-bar-label">${escHtml(m.name)}${riskBadge}</span>
-          </div>
-        </div>
+      <div class="gantt-row" style="margin-bottom:2px;margin-top:6px;position:relative;z-index:1;">
+        <div class="gantt-row-label" style="font-size:0.68rem;font-weight:600;color:var(--text-dim);padding-left:6px;" title="${escHtml(s.name)}">${escHtml(s.name)}</div>
+        <div class="gantt-row-track" style="height:${streamBarHtml ? '8px' : '3px'};"><div class="gantt-track-bg" style="opacity:0.2"></div>${todayLine}${streamBarHtml}</div>
       </div>`;
-      // Sub-task notes linked to this milestone, già ordinate per periodo dal
-      // backend (solo quelle visibili nel perimetro corrente e non nascoste)
-      const visibleLinkedNotes = (m.linked_notes || []).filter(ln => {
-        if (hiddenNotes.has(ln.id)) return false;
-        const d = ln.start_date || ln.due_date || ln.created_at;
-        return _inRange(d, d);
-      });
-      if (visibleLinkedNotes.length) {
-        for (const ln of visibleLinkedNotes) {
-          const lnDate = ln.start_date || ln.due_date || ln.created_at;
-          const statusIcon = STATUS_EMOJI[ln.status] || '·';
-          const doneStyle = ln.status === 'done' ? 'opacity:0.4;text-decoration:line-through' : '';
-          // Se ha sia start che due date, una barra (start -> due), non solo un puntino.
-          const markerHtml = (ln.start_date && ln.due_date)
-            ? (() => {
-                const barLeft = pct(ln.start_date);
-                const barRight = pct(ln.due_date);
-                const barWidth = Math.max(parseFloat(barRight) - parseFloat(barLeft), oneDayPct).toFixed(2);
-                return `<div class="gantt-subnote-bar" style="left:${barLeft}%;width:${barWidth}%;background:${p.color};${ln.status==='done'?'opacity:0.35':''}" title="${escHtml(ln.content)} (${ln.start_date} → ${ln.due_date})"></div>`;
-              })()
-            : `<div class="gantt-subnote-pin" style="left:${pct(lnDate)}%;background:${p.color};${ln.status==='done'?'opacity:0.35':''}" title="${escHtml(ln.content)} (${lnDate})"></div>`;
-          rowsHtml += `
-          <div class="gantt-row gantt-subnote-row">
-            <div class="gantt-row-label" style="${doneStyle};padding-left:18px;font-size:0.64rem;gap:4px;">
-              <span style="font-size:0.7em;">${statusIcon}</span>
-              <a href="#" onclick="goToNote(event,'${ln.created_at}')"
-                 style="color:var(--text-dim);text-decoration:none;"
-                 onmouseover="this.style.color='var(--accent)'"
-                 onmouseout="this.style.color='var(--text-dim)'">${escHtml(ln.content)}</a>
+
+      for (const ph of streamPhases) {
+        const barLeft = pct(ph.start_date);
+        const barRight = pct(ph.end_date);
+        const barWidth = Math.max(parseFloat(barRight) - parseFloat(barLeft), oneDayPct).toFixed(2);
+        const riskBadge = ph._atRisk ? ' ⚠️' : '';
+        const riskStyle = ph._atRisk
+          ? `outline: 2px solid var(--yellow); outline-offset: 1px;`
+          : ph._overdue ? `opacity:0.6;` : '';
+        const labelStyle = ph._atRisk ? 'color:var(--yellow);font-weight:600;' : '';
+        // Una nota agganciata direttamente allo Stream si comporta come una
+        // fase (barra, rischio, ecc.) ma resta cliccabile per aprire la nota.
+        // Distinzione visiva richiesta: la Fase vera è solo bordo colorato
+        // (il riempimento pieno è riservato allo Stream, v. sopra); la nota
+        // invece è a colore pieno ma non mostra il proprio testo dentro la
+        // barra (già cliccabile a sinistra) — solo icona di stato + date,
+        // così resta leggibile anche su barre strette.
+        const isNotePhase = !!ph.is_note;
+        const doneBarStyle = (isNotePhase && ph.status === 'done') ? 'opacity:0.6;' : '';
+        const nameHtml = isNotePhase
+          ? `<a href="#" onclick="goToNote(event,'${ph.created_at}',${ph.note_id})" style="color:inherit;text-decoration:none;" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color=''">📝 ${escHtml(ph.name)}</a>`
+          : escHtml(ph.name);
+        const barStyle = isNotePhase
+          ? `background:${sColor};${riskStyle}${doneBarStyle}`
+          : `background:transparent;border:2px solid ${sColor};color:${sColor};${riskStyle}`;
+        const barContent = isNotePhase
+          ? `${STATUS_EMOJI[ph.status] || '⬜'} ${ph.start_date} → ${ph.end_date}`
+          : `${escHtml(ph.name)}${riskBadge}`;
+        rowsHtml += `
+        <div class="gantt-row gantt-phase-row">
+          <div class="gantt-row-label" title="${escHtml(ph.name)}" style="${labelStyle}padding-left:16px;">${nameHtml}${riskBadge}</div>
+          <div class="gantt-row-track">
+            <div class="gantt-track-bg"></div>
+            ${todayLine}
+            <div class="gantt-bar" style="left:${barLeft}%;width:${barWidth}%;${barStyle}" title="${ph.start_date} → ${ph.end_date}">
+              <span class="gantt-bar-label">${barContent}</span>
             </div>
-            <div class="gantt-row-track" style="height:20px;">
-              ${todayLine}
-              ${markerHtml}
-            </div>
-          </div>`;
+          </div>
+        </div>`;
+        // Sub-task notes linked to this milestone, già ordinate per periodo dal
+        // backend (solo quelle visibili nel perimetro corrente e non nascoste)
+        const visibleLinkedNotes = (ph.linked_notes || []).filter(ln => {
+          if (hiddenNotes.has(ln.id)) return false;
+          const d = ln.start_date || ln.due_date || ln.created_at;
+          return _inRange(d, d);
+        });
+        if (visibleLinkedNotes.length) {
+          for (const ln of visibleLinkedNotes) {
+            const lnDate = ln.start_date || ln.due_date || ln.created_at;
+            const statusIcon = STATUS_EMOJI[ln.status] || '·';
+            const doneStyle = ln.status === 'done' ? 'opacity:0.4;text-decoration:line-through' : '';
+            // Se ha sia start che due date, una barra (start -> due), non solo un puntino.
+            const markerHtml = (ln.start_date && ln.due_date)
+              ? (() => {
+                  const barLeft = pct(ln.start_date);
+                  const barRight = pct(ln.due_date);
+                  const barWidth = Math.max(parseFloat(barRight) - parseFloat(barLeft), oneDayPct).toFixed(2);
+                  return `<div class="gantt-subnote-bar" style="left:${barLeft}%;width:${barWidth}%;background:${sColor};${ln.status==='done'?'opacity:0.35':''}" title="${escHtml(ln.content)} (${ln.start_date} → ${ln.due_date})"></div>`;
+                })()
+              : `<div class="gantt-subnote-pin" style="left:${pct(lnDate)}%;background:${sColor};${ln.status==='done'?'opacity:0.35':''}" title="${escHtml(ln.content)} (${lnDate})"></div>`;
+            rowsHtml += `
+            <div class="gantt-row gantt-subnote-row">
+              <div class="gantt-row-label" style="${doneStyle};padding-left:28px;font-size:0.64rem;gap:4px;">
+                <span style="font-size:0.7em;">${statusIcon}</span>
+                <a href="#" onclick="goToNote(event,'${ln.created_at}')"
+                   style="color:var(--text-dim);text-decoration:none;"
+                   onmouseover="this.style.color='var(--accent)'"
+                   onmouseout="this.style.color='var(--text-dim)'">${escHtml(ln.content)}</a>
+              </div>
+              <div class="gantt-row-track" style="height:20px;">
+                ${todayLine}
+                ${markerHtml}
+              </div>
+            </div>`;
+          }
         }
       }
-    }
+    });
 
     // One row per note with due_date (solo quelle visibili nel perimetro e non
     // nascoste). Se la nota ha anche start_date, si mostra come barra (start ->
@@ -2680,8 +3073,11 @@ function renderGanttChart(data) {
             const barLeft = pct(n.start_date);
             const barRight = pct(n.due_date);
             const barWidth = Math.max(parseFloat(barRight) - parseFloat(barLeft), oneDayPct).toFixed(2);
-            return `<div class="gantt-bar" style="left:${barLeft}%;width:${barWidth}%;background:var(--red);${n.status==='done'?'opacity:0.35':''}" title="${escHtml(tooltip)}">
-                      <span class="gantt-bar-label">${escHtml(n.content)}</span>
+            // Il ✅ va in testa all'etichetta (non in coda): con barre strette il
+            // testo viene troncato con "…" e un suffisso finirebbe sempre tagliato.
+            const doneBadge = n.status === 'done' ? '✅ ' : '';
+            return `<div class="gantt-bar" style="left:${barLeft}%;width:${barWidth}%;background:var(--red);${n.status==='done'?'opacity:0.55':''}" title="${escHtml(tooltip)}">
+                      <span class="gantt-bar-label">${doneBadge}${escHtml(n.content)}</span>
                     </div>`;
           })()
         : (isPlainTodo
@@ -2699,6 +3095,7 @@ function renderGanttChart(data) {
       </div>`;
     }
   }
+  if (_lastClientKey !== undefined) rowsHtml += `</div>`;
 
   const warningPanel = atRiskList.length ? `
   <div style="background:rgba(234,179,8,0.08);border:1px solid var(--yellow);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:0.78rem;">
@@ -2716,7 +3113,7 @@ function renderGanttChart(data) {
       </div>
     </div>
     <div class="gantt-body" style="position:relative;">
-      <div style="position:absolute;left:180px;right:0;top:0;bottom:0;overflow:hidden;pointer-events:none;z-index:0;">
+      <div style="position:absolute;left:240px;right:0;top:0;bottom:0;overflow:hidden;pointer-events:none;z-index:0;">
         ${weekendBandsHtml}
         ${bgBandsHtml}
         ${absenceBgBandsHtml}
@@ -2767,7 +3164,7 @@ async function deleteGanttProject(id, e) {
   } catch { toast('Errore eliminazione', 'error'); }
 }
 
-function editNoteStream(e, noteId, currentStreamId, project) {
+function editNoteStream(e, noteId, currentKey, project) {
   e.stopPropagation();
   const existing = document.getElementById('ms-picker');
   if (existing) { const prev = existing._noteId; existing.remove(); if (prev === noteId) return; }
@@ -2779,8 +3176,8 @@ function editNoteStream(e, noteId, currentStreamId, project) {
   picker._noteId = noteId;
   picker.style.cssText = `position:fixed;top:${rect.bottom + 4}px;left:${rect.left}px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:4px;z-index:1000;min-width:200px;max-height:280px;overflow-y:auto;box-shadow:0 4px 20px rgba(0,0,0,0.35);`;
   picker.innerHTML = `
-    <div style="padding:3px 8px 5px;font-size:0.62rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Collega a stream</div>
-    <div class="ms-pick-item${!currentStreamId?' ms-pick-active':''}" onclick="setNoteStreamLink(${noteId},null)">— nessuno</div>
+    <div style="padding:3px 8px 5px;font-size:0.62rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Collega a fase o stream</div>
+    <div class="ms-pick-item${!currentKey?' ms-pick-active':''}" onclick="setNoteStreamLink(${noteId},'')">— nessuna</div>
     <div id="ms-pick-body"><div style="padding:6px 10px;font-size:0.72rem;color:var(--text-muted);">Caricamento…</div></div>`;
   document.body.appendChild(picker);
 
@@ -2789,9 +3186,11 @@ function editNoteStream(e, noteId, currentStreamId, project) {
   };
   setTimeout(() => document.addEventListener('click', closeHandler), 0);
 
-  // Tutti gli Stream del contesto (non solo quelli del progetto della nota — la
-  // nota potrebbe non avere un campo "progetto" testuale valorizzato se è
-  // stata collegata direttamente tramite il campo "stream" alla creazione).
+  // Tutti gli Stream e le Fasi del contesto (non solo quelli del progetto
+  // della nota — la nota potrebbe non avere un campo "progetto" testuale
+  // valorizzato se è stata collegata direttamente tramite il campo "fase").
+  // Uno Stream senza fasi si può agganciare direttamente (📁): la nota stessa
+  // fa da "fase" nel Gantt — utile per lavoro semplice, es. "attività extra".
   apiFetch('/api/gantt/streams/all')
     .then(r => r.json()).then(data => {
       const body = document.getElementById('ms-pick-body');
@@ -2800,23 +3199,32 @@ function editNoteStream(e, noteId, currentStreamId, project) {
         body.innerHTML = `<div style="padding:6px 10px;font-size:0.72rem;color:var(--text-muted);">Nessuno stream disponibile</div>`;
         return;
       }
-      body.innerHTML = data.streams.map(s =>
-        `<div class="ms-pick-item${s.id===currentStreamId?' ms-pick-active':''}" onclick="setNoteStreamLink(${noteId},${s.id})">🏁 ${escHtml(s.label)}</div>`
-      ).join('');
+      body.innerHTML = data.streams.map(s => {
+        const icon = s.key.startsWith('stream:') ? '📁' : '🏁';
+        return `<div class="ms-pick-item${s.key===currentKey?' ms-pick-active':''}" onclick="setNoteStreamLink(${noteId},'${s.key}')">${icon} ${escHtml(s.label)}</div>`;
+      }).join('');
     });
 }
 
-async function setNoteStreamLink(noteId, streamId) {
+async function setNoteStreamLink(noteId, key) {
   const picker = document.getElementById('ms-picker');
   if (picker) picker.remove();
+  let body;
+  if (!key) {
+    body = { clear_milestone: true, clear_stream_id: true };
+  } else {
+    const [kind, idStr] = key.split(':');
+    const id = parseInt(idStr, 10);
+    body = kind === 'stream' ? { stream_id: id } : { milestone_id: id };
+  }
   try {
     await apiFetch(`/api/notes/${noteId}`, {
       method: 'PATCH',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(streamId ? {milestone_id: streamId} : {clear_milestone: true})
+      body: JSON.stringify(body)
     });
     await loadNotes();
-    toast(streamId ? 'Nota collegata allo stream' : 'Stream rimosso', 'success');
+    toast(key ? 'Nota collegata' : 'Collegamento rimosso', 'success');
   } catch { toast('Errore', 'error'); }
 }
 
@@ -2829,19 +3237,30 @@ function _findStreamById(streamId) {
   return null;
 }
 
-function editGanttStream(streamId) {
-  const stream = _findStreamById(streamId);
-  if (!stream) return;
+function _findPhaseById(phaseId) {
+  if (!ganttData) return null;
+  for (const project of ganttData.projects) {
+    for (const s of (project.streams || [])) {
+      const ph = (s.phases || []).find(ph => ph.id === phaseId);
+      if (ph) return ph;
+    }
+  }
+  return null;
+}
 
-  const item = document.querySelector(`.gantt-ms-item[data-mid="${streamId}"]`);
+function editGanttPhase(phaseId) {
+  const phase = _findPhaseById(phaseId);
+  if (!phase) return;
+
+  const item = document.querySelector(`.gantt-ms-item[data-pid="${phaseId}"]`);
   if (!item || item.classList.contains('editing')) return;
   item.classList.add('editing');
   item.innerHTML = `
-    <form class="gantt-ms-edit-form" onsubmit="saveGanttStream(event,${streamId})">
-      <input class="gantt-input" name="name" value="${escHtml(stream.name)}" maxlength="80" required>
+    <form class="gantt-ms-edit-form" onsubmit="saveGanttPhase(event,${phaseId})">
+      <input class="gantt-input" name="name" value="${escHtml(phase.name)}" maxlength="80" required>
       <div class="gantt-ms-edit-dates">
-        <input class="gantt-input" type="date" name="start" value="${stream.start_date || ''}">
-        <input class="gantt-input" type="date" name="end" value="${stream.end_date || ''}">
+        <input class="gantt-input" type="date" name="start" value="${phase.start_date || ''}">
+        <input class="gantt-input" type="date" name="end" value="${phase.end_date || ''}">
       </div>
       <div class="gantt-ms-edit-actions">
         <button type="submit" class="gantt-btn-sm">Salva</button>
@@ -2852,7 +3271,7 @@ function editGanttStream(streamId) {
   item.querySelector('input[name="start"]').focus();
 }
 
-async function saveGanttStream(e, streamId) {
+async function saveGanttPhase(e, phaseId) {
   e.preventDefault();
   e.stopPropagation();
   const form = e.target;
@@ -2861,7 +3280,7 @@ async function saveGanttStream(e, streamId) {
   const end = form.end.value;
   if (!name) return;
   try {
-    const res = await apiFetch(`/api/gantt/streams/${streamId}`, {
+    const res = await apiFetch(`/api/gantt/phases/${phaseId}`, {
       method: 'PATCH',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({name, start_date: start, end_date: end}),
@@ -2870,12 +3289,12 @@ async function saveGanttStream(e, streamId) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || 'Errore');
     }
-    toast('Stream aggiornato', 'success');
+    toast('Fase aggiornata', 'success');
     await loadGantt();
     if (activeTab === 'due') await loadDueNotes();
     if (activeTab === 'focus') await loadFocus();
   } catch(err) {
-    toast(err.message || 'Errore aggiornamento stream', 'error');
+    toast(err.message || 'Errore aggiornamento fase', 'error');
   }
 }
 
@@ -3274,6 +3693,39 @@ document.getElementById('note-input')?.addEventListener('paste', function(e) {
   }
 });
 
+// Pannello "Progetti" del Gantt ridimensionabile trascinando il bordo destro —
+// larghezza persistita in localStorage così resta come l'utente l'ha lasciata.
+function _initGanttPanelResize() {
+  const handle = document.getElementById('gantt-resize-handle');
+  const panel = document.querySelector('.gantt-panel');
+  if (!handle || !panel) return;
+  const MIN_W = 220, MAX_W = 640;
+  const saved = parseInt(localStorage.getItem('noted-gantt-panel-width'), 10);
+  if (saved && saved >= MIN_W && saved <= MAX_W) panel.style.width = saved + 'px';
+
+  let dragging = false, startX = 0, startWidth = 0;
+  handle.addEventListener('mousedown', (e) => {
+    dragging = true;
+    startX = e.clientX;
+    startWidth = panel.getBoundingClientRect().width;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const newWidth = Math.min(MAX_W, Math.max(MIN_W, startWidth + (e.clientX - startX)));
+    panel.style.width = newWidth + 'px';
+  });
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    localStorage.setItem('noted-gantt-panel-width', Math.round(panel.getBoundingClientRect().width));
+  });
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadNotes();
 resetRefresh();
@@ -3281,7 +3733,9 @@ _loadLocalIp();
 loadDocRoot();
 loadOllamaSettings();
 loadStreamDatalist();
+loadClientProjectsDatalist();
 checkForUpdate();
+_initGanttPanelResize();
 
 // ── Voice input ───────────────────────────────────────────────────────────────
 let _mediaRecorder = null;
@@ -3464,21 +3918,37 @@ async function _loadDocsForAnalysis() {
   const list = document.getElementById('doc-selector-list');
   list.innerHTML = '<div style="color:var(--text-muted);font-size:0.8rem;padding:8px 0;">Caricamento…</div>';
   try {
-    const res = await fetch(`/api/docs?ctx=${encodeURIComponent(ctx)}`);
-    const docs = await res.json();
-    if (!docs.length) {
-      list.innerHTML = '<div style="color:var(--text-muted);font-size:0.8rem;padding:8px 0;">Nessun documento trovato.<br>Allega file alle tue note per vederli qui.</div>';
+    const [attachedRes, folderRes] = await Promise.all([
+      fetch(`/api/docs?ctx=${encodeURIComponent(ctx)}`),
+      fetch('/api/docs/folder-scan'),
+    ]);
+    const attached = await attachedRes.json();
+    const found = folderRes.ok ? await folderRes.json() : [];
+
+    if (!attached.length && !found.length) {
+      list.innerHTML = '<div style="color:var(--text-muted);font-size:0.8rem;padding:8px 0;">Nessun documento trovato.<br>Allega file alle tue note, o mettili nella cartella impostata in Impostazioni.</div>';
       return;
     }
-    list.innerHTML = docs.map(d => `
-      <label class="doc-selector-item" id="dsel-${d.id}">
-        <input type="checkbox" value="${d.id}" onchange="_syncSelectorStyle(${d.id}, this.checked)">
+
+    const _item = (key, mime, name, relPath, size) => `
+      <label class="doc-selector-item" id="dsel-${_safeDomId(key)}">
+        <input type="checkbox" value="${escHtml(key)}" onchange="_syncSelectorStyle(this)">
         <div style="min-width:0;">
-          <div class="doc-selector-name">${_fileIcon(d.mime_type, d.orig_name)} ${escHtml(d.orig_name)}</div>
-          <div class="doc-selector-meta">${d.rel_path.split('/').slice(0,-1).join(' / ')} · ${_fmtSize(d.size_bytes)}</div>
+          <div class="doc-selector-name">${_fileIcon(mime, name)} ${escHtml(name)}</div>
+          <div class="doc-selector-meta">${escHtml(relPath.split('/').slice(0,-1).join(' / '))} · ${_fmtSize(size)}</div>
         </div>
-      </label>
-    `).join('');
+      </label>`;
+
+    let html = '';
+    if (attached.length) {
+      html += `<div class="doc-selector-group-label">📎 Allegati alle note</div>`;
+      html += attached.map(d => _item(`doc:${d.id}`, d.mime_type, d.orig_name, d.rel_path, d.size_bytes)).join('');
+    }
+    if (found.length) {
+      html += `<div class="doc-selector-group-label">📁 Trovati nella cartella</div>`;
+      html += found.map(d => _item(`folder:${d.rel_path}`, d.mime_type, d.orig_name, d.rel_path, d.size_bytes)).join('');
+    }
+    list.innerHTML = html;
   } catch {
     list.innerHTML = '<div style="color:var(--red);font-size:0.8rem;">Errore nel caricamento</div>';
   }
@@ -3486,20 +3956,27 @@ async function _loadDocsForAnalysis() {
 
 const _MAX_ANALYSIS_DOCS = 5;
 
-function _syncSelectorStyle(id, checked) {
+// Una chiave "doc:5" o "folder:sotto/cartella con spazi/file.pdf" non è un
+// selettore CSS valido as-is (":" e "/" hanno significato speciale) — qui
+// serve solo per un id DOM leggibile, il valore vero resta nell'attributo
+// value del checkbox.
+function _safeDomId(key) {
+  return key.replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+function _syncSelectorStyle(checkbox) {
   const all = [...document.querySelectorAll('#doc-selector-list input[type=checkbox]')];
   const nChecked = all.filter(c => c.checked).length;
 
   // Se si cerca di aggiungere oltre il limite, blocca
-  if (checked && nChecked > _MAX_ANALYSIS_DOCS) {
-    const inp = document.querySelector(`#dsel-${id} input`);
-    if (inp) inp.checked = false;
+  if (checkbox.checked && nChecked > _MAX_ANALYSIS_DOCS) {
+    checkbox.checked = false;
     toast(`Massimo ${_MAX_ANALYSIS_DOCS} documenti per analisi`, 'error');
     _updateDocSelCount();
     return;
   }
 
-  document.getElementById(`dsel-${id}`)?.classList.toggle('selected', checked);
+  checkbox.closest('.doc-selector-item')?.classList.toggle('selected', checkbox.checked);
   _updateDocSelCount();
 }
 
@@ -3528,7 +4005,15 @@ async function runDocAnalysis() {
   const checked = [...document.querySelectorAll('#doc-selector-list input[type=checkbox]:checked')];
   if (!checked.length) { toast('Seleziona almeno un documento', 'error'); return; }
 
-  const docIds = checked.map(c => parseInt(c.value));
+  // Ogni value è "doc:<id>" (allegato a una nota) o "folder:<rel_path>"
+  // (trovato scansionando doc_root) — v. _loadDocsForAnalysis.
+  const docIds = [], folderPaths = [];
+  for (const c of checked) {
+    const [kind, ...rest] = c.value.split(':');
+    const value = rest.join(':');
+    if (kind === 'doc') docIds.push(parseInt(value));
+    else if (kind === 'folder') folderPaths.push(value);
+  }
   const extra  = document.getElementById('doc-analysis-extra').value.trim();
   const depth  = document.querySelector('input[name="analysis-depth"]:checked')?.value || 'medium';
 
@@ -3544,7 +4029,7 @@ async function runDocAnalysis() {
     const res = await fetch('/api/analyze-docs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ doc_ids: docIds, extra_instructions: extra || null, depth }),
+      body: JSON.stringify({ doc_ids: docIds, folder_paths: folderPaths, extra_instructions: extra || null, depth }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));

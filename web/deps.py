@@ -20,6 +20,7 @@ def note_dict(n):
         "status": n.status,
         "assignee": n.assignee,
         "milestone_id": n.milestone_id,
+        "stream_id": n.stream_id,
         "email_subject": n.email_subject,
         "email_body": n.email_body,
         "created_at": n.created_at.isoformat(),

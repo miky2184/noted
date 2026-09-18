@@ -1,4 +1,5 @@
 import asyncio
+import mimetypes
 from datetime import date
 from functools import partial
 from pathlib import Path
@@ -6,6 +7,7 @@ from typing import Optional
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
+from sqlmodel import select
 
 from db import crud
 from db.engine import get_session
@@ -171,6 +173,50 @@ async def api_list_docs(request: Request):
     return [doc_dict(d) for d in docs]
 
 
+_SCAN_IGNORE = {".git", "__pycache__", "node_modules", ".DS_Store", "Thumbs.db"}
+_SCAN_MAX_FILES = 300
+
+
+@router.get("/api/docs/folder-scan")
+async def api_scan_doc_folder():
+    """File già presenti fisicamente in doc_root, mai caricati/allegati tramite
+    noted (nessuna riga in Document) — permette di sceglierli per l'analisi
+    senza doverli prima attaccare a una nota. Cambiare doc_root nelle
+    impostazioni non sposta i file già allegati (v. /api/docs), ma qui sotto
+    scansiona la cartella corrente per quelli che ci sono già."""
+    from db.config import get_doc_root
+    doc_root = Path(get_doc_root()).expanduser()
+    if not doc_root.is_dir():
+        return []
+
+    with get_session() as session:
+        tracked = set(session.exec(select(Document.rel_path)).all())
+
+    results = []
+    for fp in sorted(doc_root.rglob("*")):
+        if len(results) >= _SCAN_MAX_FILES:
+            break
+        if not fp.is_file():
+            continue
+        rel_parts = fp.relative_to(doc_root).parts
+        if any(part.startswith(".") or part in _SCAN_IGNORE for part in rel_parts):
+            continue
+        rel = str(fp.relative_to(doc_root))
+        if rel in tracked:
+            continue
+        try:
+            size = fp.stat().st_size
+        except OSError:
+            continue
+        results.append({
+            "rel_path": rel,
+            "orig_name": fp.name,
+            "mime_type": mimetypes.guess_type(fp.name)[0],
+            "size_bytes": size,
+        })
+    return results
+
+
 # ── Document analysis ──────────────────────────────────────────────────────────
 
 _ANALYSIS_SYSTEM = """Sei un assistente che analizza documenti di lavoro e li trasforma in elementi strutturati per un'app di project management.
@@ -207,9 +253,22 @@ Suggerisci solo elementi concreti e azionabili. Le date delle milestone devono e
 
 
 class AnalyzeDocsRequest(BaseModel):
-    doc_ids: list[int]
+    doc_ids: list[int] = []
+    folder_paths: list[str] = []  # rel_path di file trovati in doc_root via /api/docs/folder-scan
     extra_instructions: Optional[str] = None
     depth: str = "medium"  # low | medium | high
+
+
+class _ScanDoc:
+    """Adatta un file trovato solo su disco (non in Document) alla stessa
+    forma usata dal loop di analisi sotto, senza duplicarne la logica."""
+    __slots__ = ("id", "rel_path", "orig_name", "mime_type")
+
+    def __init__(self, rel_path: str):
+        self.id = None
+        self.rel_path = rel_path
+        self.orig_name = Path(rel_path).name
+        self.mime_type = mimetypes.guess_type(self.orig_name)[0]
 
 
 @router.post("/api/analyze-docs")
@@ -218,11 +277,12 @@ async def api_analyze_docs(request: Request, body: AnalyzeDocsRequest):
     from db.config import get_doc_root, get_model
     from anthropic import Anthropic
 
-    if not body.doc_ids:
+    total_selected = len(body.doc_ids) + len(body.folder_paths)
+    if not total_selected:
         raise HTTPException(status_code=400, detail="Nessun documento selezionato")
-    if len(body.doc_ids) > MAX_DOCS:
+    if total_selected > MAX_DOCS:
         raise HTTPException(status_code=400,
-            detail=f"Massimo {MAX_DOCS} documenti per analisi (selezionati: {len(body.doc_ids)})")
+            detail=f"Massimo {MAX_DOCS} documenti per analisi (selezionati: {total_selected})")
 
     limits = DEPTH_LIMITS.get(body.depth, DEPTH_LIMITS["medium"])
     max_chars_per_doc = limits["chars_per_doc"]
@@ -236,6 +296,7 @@ async def api_analyze_docs(request: Request, body: AnalyzeDocsRequest):
     with get_session() as session:
         docs = [session.get(Document, did) for did in body.doc_ids]
     docs = [d for d in docs if d]
+    docs += [_ScanDoc(rel) for rel in body.folder_paths]
     if not docs:
         raise HTTPException(status_code=404, detail="Documenti non trovati")
 
@@ -317,8 +378,10 @@ async def api_analyze_docs(request: Request, body: AnalyzeDocsRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    # Persist analysis on the document when a single doc was analysed
-    if len(docs) == 1:
+    # Persist analysis on the document when a single, real (uploaded) doc was
+    # analysed — un file trovato solo via folder-scan non ha una riga Document
+    # su cui salvare (id è None).
+    if len(docs) == 1 and docs[0].id is not None:
         summary = result.get("summary", "")
         if summary:
             with get_session() as session:

@@ -2,7 +2,7 @@ from datetime import date, datetime, timedelta
 from typing import Optional
 from sqlmodel import Session, select
 from sqlalchemy import or_, and_, delete as sa_delete, update as sa_update, text
-from db.models import Note, Recap, GanttProject, Context, NoteDependency, Document, Client, Stream, Absence
+from db.models import Note, Recap, GanttProject, Context, NoteDependency, Document, Client, Stream, Phase, Absence
 
 
 # ── Context ────────────────────────────────────────────────────────────────────
@@ -75,6 +75,22 @@ def _sync_project_client_from_note(session: Session, project: Optional[str], cli
         select(GanttProject).where(GanttProject.context == ctx, GanttProject.name.ilike(project))
     ).first()
     if not proj:
+        # Non creare un progetto "fantasma" per un gruppo di note ormai tutte
+        # concluse (es. nota storica già "done" alla creazione, o richiamata
+        # dalla riconciliazione su dati vecchi) — se il lavoro viene riaperto,
+        # riportare una nota a uno stato non-done farà scattare la creazione
+        # al giro successivo. Un progetto già esistente che finisce tutte le
+        # sue note nel tempo resta invece da archiviare manualmente: non va
+        # fatto sparire da solo senza che l'utente se ne accorga.
+        statuses = session.exec(
+            select(Note.status).where(
+                Note.context == ctx,
+                Note.project.ilike(project),
+                Note.cliente.ilike(cliente),
+            )
+        ).all()
+        if statuses and all(s == "done" for s in statuses):
+            return
         proj = GanttProject(name=project, color=_color_for(project), context=ctx)
         session.add(proj)
         session.commit()
@@ -106,10 +122,15 @@ def add_note(
     assignee: Optional[str] = None,
     ctx: str = "default",
     milestone_id: Optional[int] = None,
+    stream_id: Optional[int] = None,
 ) -> Note:
+    # milestone_id (Fase) e stream_id (Stream diretto) sono mutuamente esclusivi:
+    # una nota è "dentro" una Fase oppure fa lei stessa da fase per uno Stream.
+    if stream_id is not None:
+        milestone_id = None
     note = Note(content=content, tags=tags, cliente=cliente, project=project, priority=priority,
                 start_date=start_date, due_date=due_date, status=status, assignee=assignee,
-                context=ctx, milestone_id=milestone_id)
+                context=ctx, milestone_id=milestone_id, stream_id=stream_id)
     session.add(note)
     session.commit()
     session.refresh(note)
@@ -156,6 +177,13 @@ def get_notes(
     if status:
         stmt = stmt.where(Note.status == status)
 
+    # Le note di tracking auto-create per una Fase (v. add_phase) sono già
+    # rappresentate dalla barra della Fase stessa nel Gantt — non devono
+    # comparire nella lista note "vere" (a meno che non le si cerchi
+    # esplicitamente per tag, es. per debug).
+    if tag != "milestone":
+        stmt = _exclude_milestone_tag(stmt)
+
     stmt = stmt.order_by(Note.created_at.desc()).limit(limit)
     return session.exec(stmt).all()
 
@@ -183,6 +211,8 @@ def edit_note(
     clear_assignee: bool = False,
     milestone_id: Optional[int] = None,
     clear_milestone: bool = False,
+    stream_id: Optional[int] = None,
+    clear_stream_id: bool = False,
     ctx: Optional[str] = None,
 ) -> Optional[Note]:
     note = session.get(Note, note_id)
@@ -218,10 +248,19 @@ def edit_note(
         note.assignee = None
     elif assignee is not None:
         note.assignee = assignee if assignee else None
+    # milestone_id (Fase) e stream_id (Stream diretto) sono mutuamente esclusivi:
+    # collegarne uno scollega l'altro, così una nota ha sempre una sola
+    # collocazione nel Gantt.
     if clear_milestone:
         note.milestone_id = None
     elif milestone_id is not None:
         note.milestone_id = milestone_id
+        note.stream_id = None
+    if clear_stream_id:
+        note.stream_id = None
+    elif stream_id is not None:
+        note.stream_id = stream_id
+        note.milestone_id = None
     note.updated_at = datetime.now()
     session.add(note)
     session.commit()
@@ -229,6 +268,19 @@ def edit_note(
     _sync_project_client_from_note(session, note.project, note.cliente, note.context)
     session.refresh(note)  # vedi commento in add_note: il sync può aver committato di nuovo
     return note
+
+
+def _exclude_milestone_tag(stmt):
+    """Le note taggate "milestone" sono la nota di tracking auto-creata per uno
+    Stream (v. add_stream) — sono già rappresentate dalla barra dello Stream
+    stesso nel Gantt e non devono comparire come note "vere" altrove (Board,
+    Attività, lista note-con-scadenza di un progetto)."""
+    return stmt.where(
+        ~(Note.tags == "milestone"),
+        ~Note.tags.ilike("milestone,%"),
+        ~Note.tags.ilike("%,milestone"),
+        ~Note.tags.ilike("%,milestone,%"),
+    )
 
 
 def get_board_notes(
@@ -244,10 +296,13 @@ def get_board_notes(
     no_project: bool = False,
     no_cliente: bool = False,
     no_tag: bool = False,
+    milestone_id: Optional[int] = None,
+    stream_id: Optional[int] = None,
     ctx: str = "default",
 ) -> list[Note]:
     stmt = select(Note).where(Note.status.isnot(None), Note.context == ctx)
-    stmt = _apply_board_filters(stmt, project, cliente, assignee, tag, priority, query, created_today, due_filter, no_project, no_cliente, no_tag)
+    stmt = _exclude_milestone_tag(stmt)
+    stmt = _apply_board_filters(stmt, project, cliente, assignee, tag, priority, query, created_today, due_filter, no_project, no_cliente, no_tag, milestone_id, stream_id)
     stmt = stmt.order_by(Note.sort_order.asc(), Note.created_at.desc()).limit(500)
     return session.exec(stmt).all()
 
@@ -266,6 +321,8 @@ def get_inbox_notes(
     no_project: bool = False,
     no_cliente: bool = False,
     no_tag: bool = False,
+    milestone_id: Optional[int] = None,
+    stream_id: Optional[int] = None,
     ctx: str = "default",
     limit: int = 50,
 ) -> list[Note]:
@@ -275,7 +332,8 @@ def get_inbox_notes(
         .where(Note.status.is_(None), Note.context == ctx)
         .where(Note.created_at >= since)
     )
-    stmt = _apply_board_filters(stmt, project, cliente, assignee, tag, priority, query, created_today, due_filter, no_project, no_cliente, no_tag)
+    stmt = _exclude_milestone_tag(stmt)
+    stmt = _apply_board_filters(stmt, project, cliente, assignee, tag, priority, query, created_today, due_filter, no_project, no_cliente, no_tag, milestone_id, stream_id)
     stmt = stmt.order_by(Note.sort_order.asc(), Note.created_at.desc()).limit(limit)
     return session.exec(stmt).all()
 
@@ -293,7 +351,13 @@ def _apply_board_filters(
     no_project: bool = False,
     no_cliente: bool = False,
     no_tag: bool = False,
+    milestone_id: Optional[int] = None,
+    stream_id: Optional[int] = None,
 ):
+    if milestone_id is not None:
+        stmt = stmt.where(Note.milestone_id == milestone_id)
+    if stream_id is not None:
+        stmt = stmt.where(Note.stream_id == stream_id)
     if no_project:
         stmt = stmt.where(or_(Note.project.is_(None), Note.project == ""))
     elif project:
@@ -420,6 +484,7 @@ def get_today_activity(session: Session, ctx: str = "default", include_done: boo
     )
     if not include_done:
         stmt = stmt.where(or_(Note.status.is_(None), Note.status != "done"))
+    stmt = _exclude_milestone_tag(stmt)
     notes = session.exec(stmt).all()
 
     overdue, due_soon, starting_today, no_date = [], [], [], []
@@ -603,7 +668,7 @@ def delete_absence(session: Session, absence_id: int) -> bool:
 
 def get_streams(session: Session, project_id: int) -> list[Stream]:
     return session.exec(
-        select(Stream).where(Stream.project_id == project_id).order_by(Stream.start_date.asc())
+        select(Stream).where(Stream.project_id == project_id).order_by(Stream.created_at.asc())
     ).all()
 
 def add_stream(
@@ -637,8 +702,76 @@ def edit_stream(
         s.end_date = None
     elif end_date is not None:
         s.end_date = end_date
-    if s.note_id:
-        note = session.get(Note, s.note_id)
+    session.add(s); session.commit(); session.refresh(s)
+    return s
+
+def delete_stream(session: Session, stream_id: int) -> bool:
+    """Elimina lo stream e le sue Fasi. Le note collegate (alle fasi via
+    milestone_id, o direttamente allo stream via stream_id) restano, solo
+    scollegate."""
+    s = session.get(Stream, stream_id)
+    if not s: return False
+    phase_ids = session.exec(select(Phase.id).where(Phase.stream_id == stream_id)).all()
+    if phase_ids:
+        session.exec(sa_update(Note).where(Note.milestone_id.in_(phase_ids)).values(milestone_id=None))
+        session.exec(sa_delete(Phase).where(Phase.stream_id == stream_id))
+    session.exec(sa_update(Note).where(Note.stream_id == stream_id).values(stream_id=None))
+    session.delete(s); session.commit()
+    return True
+
+
+# ── Fasi ─────────────────────────────────────────────────────────────────────
+
+STANDARD_PHASE_NAMES = ("Analisi e Requisiti", "Implementazione", "UAT", "Rilascio in PROD")
+
+def get_phases(session: Session, stream_id: int) -> list[Phase]:
+    """Ordinate per data inizio (le fasi datate riflettono l'ordine cronologico
+    reale del lavoro, non l'ordine in cui sono state create/rinominate); le fasi
+    senza data restano in coda, ordinate come prima (sort_order, creazione)."""
+    phases = session.exec(select(Phase).where(Phase.stream_id == stream_id)).all()
+    phases.sort(key=lambda ph: (ph.start_date is None, ph.start_date or date.max, ph.sort_order, ph.created_at))
+    return phases
+
+def add_phase(
+    session: Session,
+    stream_id: int,
+    name: str,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    sort_order: int = 0,
+) -> Phase:
+    ph = Phase(stream_id=stream_id, name=name, start_date=start_date, end_date=end_date, sort_order=sort_order)
+    session.add(ph); session.commit(); session.refresh(ph)
+    return ph
+
+def add_standard_phases(session: Session, stream_id: int) -> list[Phase]:
+    """Crea in un solo click le fasi tipiche (Analisi e Requisiti / Implementazione /
+    UAT / Rilascio in PROD), senza date — l'utente le compila dopo. Non tocca eventuali
+    fasi già presenti."""
+    return [add_phase(session, stream_id, name, sort_order=i) for i, name in enumerate(STANDARD_PHASE_NAMES)]
+
+def edit_phase(
+    session: Session,
+    phase_id: int,
+    name: Optional[str] = None,
+    start_date: Optional[date] = None,
+    clear_start: bool = False,
+    end_date: Optional[date] = None,
+    clear_end: bool = False,
+) -> Optional[Phase]:
+    ph = session.get(Phase, phase_id)
+    if not ph: return None
+    if name is not None: ph.name = name
+    if clear_start:
+        ph.start_date = None
+    elif start_date is not None:
+        ph.start_date = start_date
+    if clear_end:
+        ph.end_date = None
+    elif end_date is not None:
+        ph.end_date = end_date
+    if ph.note_id:
+        note = session.get(Note, ph.note_id)
         if note:
             if name is not None:
                 note.content = name
@@ -648,15 +781,15 @@ def edit_stream(
                 note.due_date = end_date
             note.updated_at = datetime.now()
             session.add(note)
-    session.add(s); session.commit(); session.refresh(s)
-    return s
+    session.add(ph); session.commit(); session.refresh(ph)
+    return ph
 
-def delete_stream(session: Session, stream_id: int) -> bool:
-    """Elimina lo stream. La nota auto-creata collegata (note.milestone_id) resta, solo scollegata."""
-    s = session.get(Stream, stream_id)
-    if not s: return False
-    session.exec(sa_update(Note).where(Note.milestone_id == stream_id).values(milestone_id=None))
-    session.delete(s); session.commit()
+def delete_phase(session: Session, phase_id: int) -> bool:
+    """Elimina la fase. La nota auto-creata collegata (note.milestone_id) resta, solo scollegata."""
+    ph = session.get(Phase, phase_id)
+    if not ph: return False
+    session.exec(sa_update(Note).where(Note.milestone_id == phase_id).values(milestone_id=None))
+    session.delete(ph); session.commit()
     return True
 
 
@@ -734,18 +867,21 @@ def edit_gantt_project(
     return p
 
 def delete_gantt_project(session: Session, project_id: int) -> bool:
-    """Elimina il progetto. Note collegate ai suoi stream restano,
-    solo scollegate (milestone_id -> NULL) — niente viene cancellato
-    oltre al progetto stesso e ai suoi Stream."""
+    """Elimina il progetto e i suoi Stream/Fasi. Note collegate alle fasi restano,
+    solo scollegate (milestone_id -> NULL) — niente viene cancellato oltre a
+    progetto, Stream e Fasi."""
     p = session.get(GanttProject, project_id)
     if not p: return False
     stream_ids = session.exec(
         select(Stream.id).where(Stream.project_id == project_id)
     ).all()
     if stream_ids:
-        session.exec(sa_update(Note).where(Note.milestone_id.in_(stream_ids)).values(milestone_id=None))
-    for s in session.exec(select(Stream).where(Stream.project_id == project_id)).all():
-        session.delete(s)
+        phase_ids = session.exec(select(Phase.id).where(Phase.stream_id.in_(stream_ids))).all()
+        if phase_ids:
+            session.exec(sa_update(Note).where(Note.milestone_id.in_(phase_ids)).values(milestone_id=None))
+            session.exec(sa_delete(Phase).where(Phase.stream_id.in_(stream_ids)))
+        session.exec(sa_update(Note).where(Note.stream_id.in_(stream_ids)).values(stream_id=None))
+        session.exec(sa_delete(Stream).where(Stream.project_id == project_id))
     session.delete(p); session.commit()
     return True
 
@@ -930,36 +1066,45 @@ def get_gantt_data(session: Session, ctx: str = "default") -> dict:
     clients = get_clients(session, ctx=ctx)
     client_name_map = {c.id: c.name for c in clients}
 
-    # All stream-linked notes for the whole context, grouped by milestone_id
-    # (legacy column name, v. Note.milestone_id) in Python — avoids one query
-    # per stream (N+1) across every project.
+    # All phase-linked notes for the whole context, grouped by milestone_id
+    # (legacy column name, v. Note.milestone_id — ora punta a Phase.id) in Python,
+    # per evitare una query per fase (N+1) across every project.
     def _note_period_key(n: Note):
         # Ordine "di periodo": start_date se c'è, altrimenti due_date, altrimenti
         # data di creazione — non l'id/ordine di inserimento della nota.
         return n.start_date or n.due_date or n.created_at.date()
 
-    all_stream_notes = session.exec(
+    all_phase_notes = session.exec(
         select(Note).where(Note.context == ctx, Note.milestone_id.isnot(None))
     ).all()
-    notes_by_stream: dict[int, list[Note]] = {}
-    for n in all_stream_notes:
-        notes_by_stream.setdefault(n.milestone_id, []).append(n)
-    for notes in notes_by_stream.values():
+    notes_by_phase: dict[int, list[Note]] = {}
+    for n in all_phase_notes:
+        notes_by_phase.setdefault(n.milestone_id, []).append(n)
+    for notes in notes_by_phase.values():
         notes.sort(key=_note_period_key)
 
-    def _stream_data(s: Stream, project_name: str) -> dict:
-        linked = notes_by_stream.get(s.id, [])
+    # Note agganciate direttamente a uno Stream (senza una Fase intermedia) —
+    # lavoro semplice dove la nota stessa fa da "fase" nel Gantt.
+    direct_stream_notes = session.exec(
+        select(Note).where(Note.context == ctx, Note.stream_id.isnot(None))
+    ).all()
+    notes_by_stream_direct: dict[int, list[Note]] = {}
+    for n in direct_stream_notes:
+        notes_by_stream_direct.setdefault(n.stream_id, []).append(n)
+
+    def _phase_data(ph: Phase, project_name: str) -> tuple[dict, int, int]:
+        linked = notes_by_phase.get(ph.id, [])
         progress_notes = linked[:]
-        stream_note = None
-        if s.note_id and not any(n.id == s.note_id for n in progress_notes):
-            stream_note = session.get(Note, s.note_id)
-            if stream_note and stream_note.context == ctx:
-                progress_notes.append(stream_note)
-        if not s.note_id:
-            stream_note = session.exec(
+        phase_note = None
+        if ph.note_id and not any(n.id == ph.note_id for n in progress_notes):
+            phase_note = session.get(Note, ph.note_id)
+            if phase_note and phase_note.context == ctx:
+                progress_notes.append(phase_note)
+        if not ph.note_id:
+            phase_note = session.exec(
                 select(Note)
                 .where(Note.context == ctx, Note.project.ilike(project_name))
-                .where(Note.content == s.name, Note.due_date == s.end_date)
+                .where(Note.content == ph.name, Note.due_date == ph.end_date)
                 .where(or_(
                     Note.tags == "milestone",
                     Note.tags.ilike("milestone,%"),
@@ -967,17 +1112,17 @@ def get_gantt_data(session: Session, ctx: str = "default") -> dict:
                     Note.tags.ilike("%,milestone,%"),
                 ))
             ).first()
-            if stream_note and not any(n.id == stream_note.id for n in progress_notes):
-                progress_notes.append(stream_note)
+            if phase_note and not any(n.id == phase_note.id for n in progress_notes):
+                progress_notes.append(phase_note)
         progress_total = len(progress_notes)
         progress_done = sum(1 for n in progress_notes if n.status == "done")
         progress = round(progress_done / progress_total * 100) if progress_total else 0
         return {
-            "id": s.id,
-            "name": s.name,
-            "start_date": str(s.start_date) if s.start_date else None,
-            "end_date": str(s.end_date) if s.end_date else None,
-            "note_id": s.note_id,
+            "id": ph.id,
+            "name": ph.name,
+            "start_date": str(ph.start_date) if ph.start_date else None,
+            "end_date": str(ph.end_date) if ph.end_date else None,
+            "note_id": ph.note_id,
             "progress": progress,
             "progress_done": progress_done,
             "progress_total": progress_total,
@@ -990,19 +1135,77 @@ def get_gantt_data(session: Session, ctx: str = "default") -> dict:
             ]
         }, progress_done, progress_total
 
+    def _note_as_phase(n: Note) -> dict:
+        """Una nota agganciata direttamente a uno Stream si presenta nel Gantt
+        esattamente come una Fase (stessa forma dati) — il suo status ne è
+        anche il progress (1 nota, fatta o no), la nota stessa è il contenuto,
+        niente sotto-note proprie."""
+        return {
+            "id": f"note-{n.id}",
+            "name": n.content,
+            "start_date": str(n.start_date) if n.start_date else None,
+            "end_date": str(n.due_date) if n.due_date else None,
+            "note_id": n.id,
+            "is_note": True,
+            "status": n.status,
+            "created_at": n.created_at.date().isoformat(),
+            "progress": 100 if n.status == "done" else 0,
+            "progress_done": 1 if n.status == "done" else 0,
+            "progress_total": 1,
+            "linked_notes": [],
+        }
+
+    def _stream_data(s: Stream, project_name: str) -> tuple[dict, int, int]:
+        phases_data = []
+        stream_done_total = 0
+        stream_notes_total = 0
+        for ph in get_phases(session, s.id):
+            data, done, total = _phase_data(ph, project_name)
+            phases_data.append(data)
+            stream_done_total += done
+            stream_notes_total += total
+        for n in notes_by_stream_direct.get(s.id, []):
+            phases_data.append(_note_as_phase(n))
+            stream_notes_total += 1
+            if n.status == "done":
+                stream_done_total += 1
+        # Fasi reali e note-come-fase mescolate e riordinate insieme per periodo
+        # (senza data in coda), non nell'ordine "prima le Fasi, poi le note".
+        phases_data.sort(key=lambda ph: (ph["start_date"] is None, ph["start_date"] or ""))
+        progress = round(stream_done_total / stream_notes_total * 100) if stream_notes_total else 0
+        # Date effettive dello Stream: se ha almeno una Fase (o nota-come-fase),
+        # è il min/max delle loro date a contare, non quelle proprie dello
+        # Stream (che restano "di riserva" per quando non ne ha nessuna).
+        if phases_data:
+            starts = [ph["start_date"] for ph in phases_data if ph["start_date"]]
+            ends = [ph["end_date"] for ph in phases_data if ph["end_date"]]
+            eff_start = min(starts) if starts else None
+            eff_end = max(ends) if ends else None
+        else:
+            eff_start = str(s.start_date) if s.start_date else None
+            eff_end = str(s.end_date) if s.end_date else None
+        return {
+            "id": s.id,
+            "name": s.name,
+            "start_date": eff_start,
+            "end_date": eff_end,
+            "progress": progress,
+            "progress_done": stream_done_total,
+            "progress_total": stream_notes_total,
+            "phases": phases_data,
+        }, stream_done_total, stream_notes_total
+
     result = []
     for p in projects:
         streams = [] if p.is_background else get_streams(session, p.id)
-        notes_with_due = session.exec(
+        notes_with_due_stmt = (
             select(Note)
             .where(Note.due_date.isnot(None), Note.context == ctx)
             .where(Note.project.ilike(p.name))
             .where(Note.milestone_id.is_(None))
-            .where(~(Note.tags == "milestone"))
-            .where(~Note.tags.ilike("milestone,%"))
-            .where(~Note.tags.ilike("%,milestone"))
-            .where(~Note.tags.ilike("%,milestone,%"))
-        ).all()
+            .where(Note.stream_id.is_(None))
+        )
+        notes_with_due = session.exec(_exclude_milestone_tag(notes_with_due_stmt)).all()
         notes_with_due.sort(key=_note_period_key)
 
         # All notes of this project (to check risk)

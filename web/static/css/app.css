@@ -525,7 +525,9 @@
   /* ── Gantt ───────────────────────────────────────────── */
   #view-gantt { display: none; }
   .gantt-layout { display: flex; height: 100%; gap: 0; }
-  .gantt-panel { width: 310px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); overflow-y: auto; display: flex; flex-direction: column; padding: 16px; gap: 0; }
+  .gantt-panel { width: 310px; flex-shrink: 0; background: var(--surface); overflow-y: auto; display: flex; flex-direction: column; padding: 16px; gap: 0; }
+  .gantt-resize-handle { width: 6px; flex-shrink: 0; cursor: col-resize; background: var(--border); position: relative; }
+  .gantt-resize-handle:hover, .gantt-resize-handle:active { background: var(--accent); }
   .gantt-panel-title { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 12px; }
   .gantt-project-item { margin-bottom: 4px; border-radius: 8px; overflow: hidden; }
   .gantt-project-header { display: flex; align-items: center; gap: 8px; padding: 7px 8px; cursor: pointer; border-radius: 8px; transition: background 0.15s; }
@@ -552,7 +554,12 @@
   .gantt-ms-dates { font-size: 0.68rem; color: var(--text-dim); }
   .gantt-ms-edit-form { flex: 1; display: flex; flex-direction: column; gap: 4px; padding: 3px; }
   .gantt-ms-edit-form .gantt-input { font-size: 0.72rem; padding: 3px 7px; }
-  .gantt-ms-edit-dates, .gantt-ms-edit-actions { display: flex; gap: 4px; }
+  /* Le due date impilate verticalmente (non affiancate): con il pannello a
+     larghezza fissa e la Fase nidificata due livelli sotto il progetto, due
+     input affiancati diventano troppo stretti e l'icona del calendario nativa
+     del secondo campo può risultare tagliata/non cliccabile. */
+  .gantt-ms-edit-dates { display: flex; flex-direction: column; gap: 4px; }
+  .gantt-ms-edit-actions { display: flex; gap: 4px; }
   .gantt-ms-del { opacity: 0; background: none; border: none; cursor: pointer; color: var(--text-dim); font-size: 11px; padding: 1px 3px; border-radius: 3px; margin-left: auto; transition: all 0.15s; }
   .gantt-ms-del:hover { color: var(--red); }
   .gantt-add-ms-form { padding: 4px 0 8px 26px; display: none; flex-direction: column; gap: 4px; }
@@ -580,7 +587,7 @@
   .gantt-empty { color: var(--text-muted); font-size: 0.85rem; padding: 40px; text-align: center; line-height: 2; }
   .gantt-container { min-width: 500px; }
   .gantt-header-row { display: flex; margin-bottom: 6px; position: sticky; top: 0; background: var(--bg); z-index: 10; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
-  .gantt-label-col { width: 180px; flex-shrink: 0; }
+  .gantt-label-col { width: 240px; flex-shrink: 0; }
   .gantt-scale { flex: 1; position: relative; }
   .gantt-scale-mark { position: absolute; font-size: 0.62rem; color: var(--text-muted); border-left: 1px solid var(--border); padding-left: 3px; overflow: hidden; white-space: nowrap; }
   .gantt-month-mark { position: absolute; font-size: 0.65rem; font-weight: 700; color: var(--text); border-left: 2px solid var(--border-hover); padding-left: 4px; text-transform: capitalize; overflow: hidden; white-space: nowrap; }
@@ -633,7 +640,7 @@
   .dep-search-item .dep-item-id { min-width: 28px; }
   .gantt-body { }
   .gantt-row { display: flex; align-items: center; margin-bottom: 5px; min-height: 30px; }
-  .gantt-row-label { width: 180px; flex-shrink: 0; font-size: 0.8rem; color: var(--text-muted); padding-right: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gantt-row-label { width: 240px; flex-shrink: 0; font-size: 0.8rem; color: var(--text-muted); padding-right: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .gantt-row-label.project { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-top: 10px; }
   .gantt-row.project-divider .gantt-row-track { border-top: 1px solid var(--border); height: 1px; }
   .gantt-row-track { flex: 1; position: relative; height: 28px; }
@@ -766,9 +773,10 @@
     /* Due items */
     .due-item { padding: 12px 13px; }
 
-    /* Gantt: stack panel above chart */
+    /* Gantt: stack panel above chart (nessun resize orizzontale a colonna impilata) */
     .gantt-layout { flex-direction: column; }
-    .gantt-panel { width: 100%; max-height: 240px; border-right: none; border-bottom: 1px solid var(--border); }
+    .gantt-panel { width: 100% !important; max-height: 240px; border-bottom: 1px solid var(--border); }
+    .gantt-resize-handle { display: none; }
     .gantt-chart-area { padding: 14px; }
 
     /* Misc */
@@ -912,6 +920,11 @@
   .doc-selector-item input[type=checkbox] { margin-top: 2px; flex-shrink: 0; accent-color: var(--accent); }
   .doc-selector-name { color: var(--text); font-weight: 500; word-break: break-word; }
   .doc-selector-meta { font-size: 0.68rem; color: var(--text-muted); margin-top: 2px; }
+  .doc-selector-group-label {
+    font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--text-dim); margin: 10px 0 2px; padding-left: 2px;
+  }
+  .doc-selector-group-label:first-child { margin-top: 0; }
   .doc-analyze-btn {
     background: var(--accent); color: #0d0f1a; border: none;
     border-radius: 8px; padding: 9px; font-size: 0.82rem; font-weight: 700;
@@ -1081,4 +1094,33 @@
 @media (max-width: 768px) {
   .editor-split { grid-template-columns: 1fr; }
   .editor-pane-preview { display: none; }
+}
+
+/* ── Stampa Gantt (PDF) ──────────────────────────────────────────────────
+   Landscape, un cliente per pagina: il layout SPA usa pannelli assoluti a
+   piena altezza/overflow:hidden pensati per lo schermo — qui vengono forzati
+   a un flusso normale (position:static, overflow:visible, height:auto) così
+   il browser può impaginare il contenuto su più pagine, e viene reso
+   visibile solo #gantt-chart (il resto dell'interfaccia sparisce). */
+@media print {
+  @page { size: landscape; margin: 10mm; }
+
+  body * { visibility: hidden; }
+  #gantt-chart, #gantt-chart * { visibility: visible; }
+
+  .layout, .main, #view-gantt, .gantt-layout, .gantt-chart-area {
+    position: static !important;
+    overflow: visible !important;
+    height: auto !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  #gantt-chart { width: 100% !important; }
+
+  .gantt-client-page {
+    page-break-inside: avoid;
+    break-inside: avoid;
+    page-break-after: always;
+  }
+  .gantt-client-page:last-child { page-break-after: auto; }
 }

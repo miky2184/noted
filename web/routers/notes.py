@@ -60,6 +60,7 @@ class NoteCreate(BaseModel):
     status: Optional[Status] = None
     assignee: Optional[str] = None
     milestone_id: Optional[int] = None
+    stream_id: Optional[int] = None
 
 
 @router.post("/api/notes", status_code=201)
@@ -74,7 +75,7 @@ async def api_add_note(request: Request, body: NoteCreate):
             project=body.project, priority=body.priority or "medium",
             start_date=start, due_date=due,
             status=body.status or None, assignee=body.assignee or None, ctx=ctx,
-            milestone_id=body.milestone_id,
+            milestone_id=body.milestone_id, stream_id=body.stream_id,
         )
     return note_dict(note)
 
@@ -91,6 +92,8 @@ class NoteUpdate(BaseModel):
     assignee: Optional[str] = None
     milestone_id: Optional[int] = None
     clear_milestone: bool = False
+    stream_id: Optional[int] = None
+    clear_stream_id: bool = False
 
 
 @router.patch("/api/notes/{note_id}")
@@ -117,6 +120,8 @@ async def api_update_note(note_id: int, body: NoteUpdate, request: Request):
             clear_assignee=body.assignee == "",
             milestone_id=body.milestone_id,
             clear_milestone=body.clear_milestone,
+            stream_id=body.stream_id,
+            clear_stream_id=body.clear_stream_id,
             ctx=ctx,
         )
     if not note:
@@ -294,6 +299,8 @@ async def api_board(
     no_project: bool = Query(False),
     no_cliente: bool = Query(False),
     no_tag: bool = Query(False),
+    milestone_id: Optional[int] = Query(None),
+    stream_id: Optional[int] = Query(None),
 ):
     ctx = get_ctx(request)
     created_today = created == "today"
@@ -303,12 +310,14 @@ async def api_board(
                                      priority=priority or None, query=q or None,
                                      created_today=created_today, due_filter=due or None,
                                      no_project=no_project, no_cliente=no_cliente, no_tag=no_tag,
+                                     milestone_id=milestone_id, stream_id=stream_id,
                                      ctx=ctx)
         inbox = crud.get_inbox_notes(session, days=7, project=project or None, cliente=cliente or None,
                                      assignee=assignee or None, tag=tag or None,
                                      priority=priority or None, query=q or None,
                                      created_today=created_today, due_filter=due or None,
                                      no_project=no_project, no_cliente=no_cliente, no_tag=no_tag,
+                                     milestone_id=milestone_id, stream_id=stream_id,
                                      ctx=ctx)
     result = {"inbox": [], "backlog": [], "todo": [], "discuss": [], "wip": [], "waiting": [], "blocked": [], "done": []}
     for n in inbox:

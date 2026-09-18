@@ -52,6 +52,20 @@ class StreamUpdate(BaseModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None
 
+class PhaseCreate(BaseModel):
+    stream_id: int
+    name: str
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+
+class PhaseUpdate(BaseModel):
+    name: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+
+class StandardPhasesCreate(BaseModel):
+    stream_id: int
+
 class ClientCreate(BaseModel):
     name: str
 
@@ -103,6 +117,15 @@ def _get_stream_or_404(session, stream_id: int, ctx: str):
     if not stream or not project or project.context != ctx:
         raise HTTPException(status_code=404, detail="Stream non trovato")
     return stream
+
+
+def _get_phase_or_404(session, phase_id: int, ctx: str):
+    phase = session.get(crud.Phase, phase_id)
+    stream = session.get(crud.Stream, phase.stream_id) if phase else None
+    project = session.get(crud.GanttProject, stream.project_id) if stream else None
+    if not phase or not stream or not project or project.context != ctx:
+        raise HTTPException(status_code=404, detail="Fase non trovata")
+    return phase
 
 @router.get("/api/gantt")
 async def api_gantt(request: Request):
@@ -178,8 +201,7 @@ async def api_delete_gantt_project(project_id: int, request: Request):
 def _stream_dict(s) -> dict:
     return {"id": s.id, "project_id": s.project_id, "name": s.name,
             "start_date": str(s.start_date) if s.start_date else None,
-            "end_date": str(s.end_date) if s.end_date else None,
-            "note_id": s.note_id}
+            "end_date": str(s.end_date) if s.end_date else None}
 
 @router.post("/api/gantt/streams", status_code=201)
 async def api_add_stream(body: StreamCreate, request: Request):
@@ -188,32 +210,44 @@ async def api_add_stream(body: StreamCreate, request: Request):
     end = _parse_date(body.end_date, "end_date") if body.end_date else None
     _ensure_date_order(start, end)
     with get_session() as session:
-        project = _get_project_or_404(session, body.project_id, ctx)
+        _get_project_or_404(session, body.project_id, ctx)
         s = crud.add_stream(session, project_id=body.project_id, name=body.name,
                             start_date=start, end_date=end)
-        # La nota di tracking auto-creata ha senso solo per uno stream con una
-        # scadenza reale — uno stream creato senza date è pensato per raccogliere
-        # note operative vere (via milestone_id), non per generarne una fittizia.
-        if not project.is_background and end is not None:
-            note = crud.add_note(session, content=body.name, tags="milestone", project=project.name,
-                          status="todo", due_date=end, ctx=ctx)
-            s.note_id = note.id
-            session.add(s)
-            session.commit()
         return _stream_dict(s)
 
 @router.get("/api/gantt/streams/all")
 async def api_all_streams(request: Request):
-    """Tutti gli Stream del contesto attivo, con etichetta "Progetto > Stream" —
-    usato per il campo di ricerca nel form nota."""
+    """Tutti gli Stream (con o senza Fasi) e le Fasi del contesto attivo, con
+    etichetta "Progetto > Stream[ > Fase]" — usato dal campo di ricerca nel
+    form nota, che può agganciare una nota a una Fase specifica oppure
+    direttamente a uno Stream (lavoro semplice che non merita una
+    scomposizione in fasi: la nota stessa fa da "fase"). La chiave è
+    prefissata "phase:"/"stream:" per distinguere a quale delle due tabelle
+    punta l'id."""
     ctx = get_ctx(request)
     with get_session() as session:
         projects = crud.get_gantt_projects(session, ctx=ctx)
         results = []
         for p in projects:
             for s in crud.get_streams(session, p.id):
-                results.append({"id": s.id, "label": f"{p.name} > {s.name}"})
+                results.append({"key": f"stream:{s.id}", "label": f"{p.name} > {s.name}"})
+                for ph in crud.get_phases(session, s.id):
+                    results.append({"key": f"phase:{ph.id}", "label": f"{p.name} > {s.name} > {ph.name}"})
         return {"streams": results}
+
+@router.get("/api/gantt/client-projects")
+async def api_client_projects(request: Request):
+    """Progetti (nome + cliente) del contesto attivo — leggero, senza fasi/progress:
+    usato dal form nota per suggerire, mentre scrivi il campo "progetto", solo i
+    progetti del cliente già inserito (evita di riscrivere nomi lunghi)."""
+    ctx = get_ctx(request)
+    with get_session() as session:
+        projects = crud.get_gantt_projects(session, ctx=ctx)
+        client_name_map = {c.id: c.name for c in crud.get_clients(session, ctx=ctx)}
+        return [
+            {"name": p.name, "client_name": client_name_map.get(p.client_id)}
+            for p in projects if not p.is_background
+        ]
 
 @router.patch("/api/gantt/streams/{stream_id}")
 async def api_edit_stream(stream_id: int, body: StreamUpdate, request: Request):
@@ -222,8 +256,6 @@ async def api_edit_stream(stream_id: int, body: StreamUpdate, request: Request):
     end = _parse_date(body.end_date, "end_date") if body.end_date else None
     with get_session() as session:
         stream = _get_stream_or_404(session, stream_id, ctx)
-        # what the value will be *after* this update — None means "not provided" (unchanged),
-        # "" means "explicit clear" (becomes None), anything else is the new parsed date
         next_start = stream.start_date if body.start_date is None else (start if body.start_date != "" else None)
         next_end = stream.end_date if body.end_date is None else (end if body.end_date != "" else None)
         _ensure_date_order(next_start, next_end)
@@ -242,6 +274,75 @@ async def api_delete_stream(stream_id: int, request: Request):
         _get_stream_or_404(session, stream_id, ctx)
         ok = crud.delete_stream(session, stream_id)
     if not ok: raise HTTPException(status_code=404, detail="Stream non trovato")
+
+
+# ── Fasi ─────────────────────────────────────────────────────────────────────
+
+def _phase_dict(ph) -> dict:
+    return {"id": ph.id, "stream_id": ph.stream_id, "name": ph.name,
+            "start_date": str(ph.start_date) if ph.start_date else None,
+            "end_date": str(ph.end_date) if ph.end_date else None,
+            "note_id": ph.note_id}
+
+@router.post("/api/gantt/phases", status_code=201)
+async def api_add_phase(body: PhaseCreate, request: Request):
+    ctx = get_ctx(request)
+    start = _parse_date(body.start_date, "start_date") if body.start_date else None
+    end = _parse_date(body.end_date, "end_date") if body.end_date else None
+    _ensure_date_order(start, end)
+    with get_session() as session:
+        stream = _get_stream_or_404(session, body.stream_id, ctx)
+        project = session.get(crud.GanttProject, stream.project_id)
+        ph = crud.add_phase(session, stream_id=body.stream_id, name=body.name,
+                            start_date=start, end_date=end)
+        # La nota di tracking auto-creata ha senso solo per una fase con una
+        # scadenza reale — una fase creata senza date è pensata per raccogliere
+        # note operative vere (via milestone_id), non per generarne una fittizia.
+        if not project.is_background and end is not None:
+            note = crud.add_note(session, content=body.name, tags="milestone", project=project.name,
+                          status="todo", due_date=end, ctx=ctx)
+            ph.note_id = note.id
+            session.add(ph)
+            session.commit()
+        return _phase_dict(ph)
+
+@router.post("/api/gantt/phases/standard", status_code=201)
+async def api_add_standard_phases(body: StandardPhasesCreate, request: Request):
+    """Crea in un click le fasi tipiche (Analisi e Requisiti / Implementazione / UAT /
+    Rilascio in PROD) senza date — l'utente le compila dopo."""
+    ctx = get_ctx(request)
+    with get_session() as session:
+        _get_stream_or_404(session, body.stream_id, ctx)
+        phases = crud.add_standard_phases(session, body.stream_id)
+        return {"phases": [_phase_dict(ph) for ph in phases]}
+
+@router.patch("/api/gantt/phases/{phase_id}")
+async def api_edit_phase(phase_id: int, body: PhaseUpdate, request: Request):
+    ctx = get_ctx(request)
+    start = _parse_date(body.start_date, "start_date") if body.start_date else None
+    end = _parse_date(body.end_date, "end_date") if body.end_date else None
+    with get_session() as session:
+        phase = _get_phase_or_404(session, phase_id, ctx)
+        # what the value will be *after* this update — None means "not provided" (unchanged),
+        # "" means "explicit clear" (becomes None), anything else is the new parsed date
+        next_start = phase.start_date if body.start_date is None else (start if body.start_date != "" else None)
+        next_end = phase.end_date if body.end_date is None else (end if body.end_date != "" else None)
+        _ensure_date_order(next_start, next_end)
+        ph = crud.edit_phase(
+            session, phase_id, name=body.name,
+            start_date=start, clear_start=body.start_date == "",
+            end_date=end, clear_end=body.end_date == "",
+        )
+    if not ph: raise HTTPException(status_code=404, detail="Fase non trovata")
+    return _phase_dict(ph)
+
+@router.delete("/api/gantt/phases/{phase_id}", status_code=204)
+async def api_delete_phase(phase_id: int, request: Request):
+    ctx = get_ctx(request)
+    with get_session() as session:
+        _get_phase_or_404(session, phase_id, ctx)
+        ok = crud.delete_phase(session, phase_id)
+    if not ok: raise HTTPException(status_code=404, detail="Fase non trovata")
 
 
 # ── Clienti ──────────────────────────────────────────────────────────────────

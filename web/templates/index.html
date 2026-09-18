@@ -158,9 +158,11 @@
       </div>
       <div class="add-form-footer">
         <input type="text" id="note-tag" placeholder="#tag" maxlength="60">
-        <input type="text" id="note-cliente" placeholder="cliente" maxlength="60">
-        <input type="text" id="note-project" placeholder="progetto" maxlength="60">
-        <input type="text" id="note-stream" list="stream-datalist" placeholder="stream (opzionale)" maxlength="120" autocomplete="off">
+        <input type="text" id="note-cliente" list="cliente-datalist" placeholder="cliente" maxlength="60" autocomplete="off" oninput="_refreshProjectDatalist()">
+        <datalist id="cliente-datalist"></datalist>
+        <input type="text" id="note-project" list="project-datalist" placeholder="progetto" maxlength="60" autocomplete="off" onfocus="_refreshProjectDatalist()">
+        <datalist id="project-datalist"></datalist>
+        <input type="text" id="note-stream" list="stream-datalist" placeholder="fase (opzionale)" maxlength="120" autocomplete="off">
         <datalist id="stream-datalist"></datalist>
         <input type="text" id="note-assignee" placeholder="@persona1 @persona2" maxlength="120">
         <input type="date" id="note-start" title="Data inizio" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-family:inherit;font-size:0.78rem;padding:4px 8px;outline:none;width:130px;transition:border-color 0.15s;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
@@ -222,6 +224,7 @@
         <input class="board-filter-input board-filter-wide" id="board-q-filter" placeholder="cerca nella board" onkeydown="if(event.key==='Enter') loadBoard()">
         <input class="board-filter-input" id="board-cliente-filter" placeholder="filtra per cliente" onkeydown="if(event.key==='Enter') loadBoard()">
         <input class="board-filter-input" id="board-project-filter" placeholder="filtra per progetto" onkeydown="if(event.key==='Enter') loadBoard()">
+        <input class="board-filter-input" id="board-phase-filter" list="stream-datalist" placeholder="filtra per fase/stream" autocomplete="off" onchange="loadBoard()" onkeydown="if(event.key==='Enter') loadBoard()">
         <input class="board-filter-input" id="board-tag-filter" placeholder="#tag" onkeydown="if(event.key==='Enter') loadBoard()">
         <input class="board-filter-input" id="board-assignee-filter" placeholder="filtra per @persona" onkeydown="if(event.key==='Enter') loadBoard()">
         <select class="board-filter-input" id="board-priority-filter" onchange="loadBoard()" title="Priorità">
@@ -386,6 +389,7 @@
           <div class="gantt-panel-title">Assenze</div>
           <div id="gantt-absences-section"></div>
         </div>
+        <div class="gantt-resize-handle" id="gantt-resize-handle" title="Trascina per ridimensionare"></div>
         <!-- Chart area -->
         <div class="gantt-chart-area">
           <div style="display:flex;gap:4px;padding:8px 12px 0;justify-content:flex-end;align-items:center;">
@@ -401,6 +405,7 @@
             <button onclick="setGanttZoom('week')" id="zoom-week" class="gantt-zoom-btn">Settimana</button>
             <button onclick="setGanttZoom('month')" id="zoom-month" class="gantt-zoom-btn">Mese</button>
             <button onclick="setGanttZoom('auto')" id="zoom-auto" class="gantt-zoom-btn active">Auto</button>
+            <button onclick="printGantt()" class="gantt-zoom-btn" title="Stampa/esporta PDF: orizzontale, un cliente per pagina" style="margin-left:6px;">🖨️ Stampa</button>
           </div>
           <div id="gantt-chart"></div>
         </div>

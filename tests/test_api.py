@@ -200,39 +200,49 @@ def test_board_due_and_gantt_smoke(client):
 
     stream = client.post(
         "/api/gantt/streams?ctx=work",
+        json={"project_id": project.json()["id"], "name": "Release"},
+    )
+    assert stream.status_code == 201
+
+    phase = client.post(
+        "/api/gantt/phases?ctx=work",
         json={
-            "project_id": project.json()["id"],
+            "stream_id": stream.json()["id"],
             "name": "Release",
             "start_date": "2026-05-16",
             "end_date": "2026-05-20",
         },
     )
-    assert stream.status_code == 201
+    assert phase.status_code == 201
 
     gantt = client.get("/api/gantt?ctx=work")
     assert gantt.status_code == 200
     assert gantt.json()["projects"][0]["streams"][0]["name"] == "Release"
-    assert gantt.json()["projects"][0]["streams"][0]["progress_total"] == 1
+    assert gantt.json()["projects"][0]["streams"][0]["phases"][0]["progress_total"] == 1
 
-    invalid_stream = client.post(
-        "/api/gantt/streams?ctx=work",
+    invalid_phase = client.post(
+        "/api/gantt/phases?ctx=work",
         json={
-            "project_id": project.json()["id"],
+            "stream_id": stream.json()["id"],
             "name": "Invalid",
             "start_date": "2026-05-21",
             "end_date": "2026-05-20",
         },
     )
-    assert invalid_stream.status_code == 400
+    assert invalid_phase.status_code == 400
 
     hidden_project = client.post(
         "/api/gantt/projects?ctx=home",
         json={"name": "HOME", "color": "#60a5fa"},
     ).json()
+    hidden_stream = client.post(
+        "/api/gantt/streams?ctx=home",
+        json={"project_id": hidden_project["id"], "name": "Cross"},
+    ).json()
     cross_context = client.post(
-        "/api/gantt/streams?ctx=work",
+        "/api/gantt/phases?ctx=work",
         json={
-            "project_id": hidden_project["id"],
+            "stream_id": hidden_stream["id"],
             "name": "Cross context",
             "start_date": "2026-05-16",
             "end_date": "2026-05-20",
@@ -241,7 +251,7 @@ def test_board_due_and_gantt_smoke(client):
     assert cross_context.status_code == 404
 
     edited = client.patch(
-        f"/api/gantt/streams/{stream.json()['id']}?ctx=work",
+        f"/api/gantt/phases/{phase.json()['id']}?ctx=work",
         json={"name": "Release finale", "end_date": "2026-05-22"},
     )
     assert edited.status_code == 200
@@ -251,7 +261,7 @@ def test_board_due_and_gantt_smoke(client):
     linked_note = client.post(
         "/api/notes?ctx=work",
         json={
-            "content": "task collegato allo stream",
+            "content": "task collegato alla fase",
             "project": "ACME",
             "status": "todo",
             "due_date": "2026-05-21",
@@ -259,11 +269,11 @@ def test_board_due_and_gantt_smoke(client):
     ).json()
     client.patch(
         f"/api/notes/{linked_note['id']}?ctx=work",
-        json={"milestone_id": stream.json()["id"]},
+        json={"milestone_id": phase.json()["id"]},
     )
     gantt_after_link = client.get("/api/gantt?ctx=work").json()
-    stream_data = gantt_after_link["projects"][0]["streams"][0]
-    assert any(n["id"] == linked_note["id"] for n in stream_data["linked_notes"])
+    phase_data = gantt_after_link["projects"][0]["streams"][0]["phases"][0]
+    assert any(n["id"] == linked_note["id"] for n in phase_data["linked_notes"])
     assert all(n["id"] != linked_note["id"] for n in gantt_after_link["projects"][0]["notes"])
 
 
@@ -341,6 +351,37 @@ def test_note_cliente_and_project_auto_creates_gantt_project(client):
     assert sum(1 for p in gantt2["projects"] if p["name"].lower() == "finops") == 1
 
 
+def test_note_with_only_done_status_does_not_auto_create_project(client):
+    """Una nota (storica) già "done" fin dall'inizio, con cliente+progetto mai
+    visti prima, non deve generare un progetto Gantt "fantasma" — solo il
+    lavoro ancora aperto merita un progetto visibile in automatico."""
+    note = client.post("/api/notes?ctx=work", json={
+        "content": "corso già fatto", "cliente": "AGBG", "project": "AGBG", "status": "done",
+    }).json()
+    gantt = client.get("/api/gantt?ctx=work").json()
+    assert not any(p["name"] == "AGBG" for p in gantt["projects"])
+
+    # riaprire la nota (status non più "done") deve far scattare la creazione,
+    # come se fosse la prima nota "attiva" del gruppo
+    client.patch(f"/api/notes/{note['id']}?ctx=work", json={"status": "todo"})
+    gantt2 = client.get("/api/gantt?ctx=work").json()
+    assert any(p["name"] == "AGBG" for p in gantt2["projects"])
+
+
+def test_project_with_active_note_survives_when_note_marked_done(client):
+    """Un progetto creato da una nota attiva non deve sparire se quella nota
+    viene poi segnata "done" — restare visibile finché non viene archiviato
+    a mano è il comportamento voluto (niente sparizioni automatiche)."""
+    note = client.post("/api/notes?ctx=work", json={
+        "content": "task attivo", "cliente": "DB", "project": "DB", "status": "todo",
+    }).json()
+    assert any(p["name"] == "DB" for p in client.get("/api/gantt?ctx=work").json()["projects"])
+
+    client.patch(f"/api/notes/{note['id']}?ctx=work", json={"status": "done"})
+    gantt = client.get("/api/gantt?ctx=work").json()
+    assert any(p["name"] == "DB" for p in gantt["projects"])
+
+
 def test_gantt_client_delete_unlinks_projects_not_cascade(client):
     cid = client.post("/api/gantt/clients?ctx=work", json={"name": "ACME"}).json()["id"]
     project = client.post("/api/gantt/projects?ctx=work", json={"name": "SITO"}).json()
@@ -377,21 +418,204 @@ def test_gantt_stream_crud(client):
     assert client.delete(f"/api/gantt/streams/{stream_id}?ctx=work").status_code == 404
 
 
+def test_stream_own_dates_used_only_without_phases(client):
+    """Uno Stream senza Fasi può avere proprie start_date/end_date (usate per
+    piazzarlo comunque sulla timeline); appena ha una Fase, nel Gantt vince
+    l'aggregato min/max delle date delle sue Fasi, non più le date proprie."""
+    project = client.post("/api/gantt/projects?ctx=work", json={"name": "ACME"}).json()
+
+    created = client.post("/api/gantt/streams?ctx=work", json={
+        "project_id": project["id"], "name": "Attività extra",
+        "start_date": "2026-09-01", "end_date": "2026-09-10",
+    })
+    assert created.status_code == 201
+    stream_id = created.json()["id"]
+    assert created.json()["start_date"] == "2026-09-01"
+
+    gantt = client.get("/api/gantt?ctx=work").json()
+    stream_data = gantt["projects"][0]["streams"][0]
+    assert stream_data["start_date"] == "2026-09-01"
+    assert stream_data["end_date"] == "2026-09-10"
+
+    # date invertite rifiutate anche in creazione
+    invalid = client.post("/api/gantt/streams?ctx=work", json={
+        "project_id": project["id"], "name": "Invalid",
+        "start_date": "2026-09-20", "end_date": "2026-09-10",
+    })
+    assert invalid.status_code == 400
+
+    # aggiungere una fase con date diverse fa vincere l'aggregato, non più le date proprie
+    client.post("/api/gantt/phases?ctx=work", json={
+        "stream_id": stream_id, "name": "Analisi",
+        "start_date": "2026-10-01", "end_date": "2026-10-15",
+    })
+    client.post("/api/gantt/phases?ctx=work", json={
+        "stream_id": stream_id, "name": "Implementazione",
+        "start_date": "2026-10-20", "end_date": "2026-11-30",
+    })
+    gantt2 = client.get("/api/gantt?ctx=work").json()
+    stream_data2 = gantt2["projects"][0]["streams"][0]
+    assert stream_data2["start_date"] == "2026-10-01"  # min tra le fasi
+    assert stream_data2["end_date"] == "2026-11-30"     # max tra le fasi
+
+    # modificare le date "proprie" dello stream a questo punto non ha effetto
+    # visibile nel Gantt (restano superate dall'aggregato delle fasi)
+    client.patch(f"/api/gantt/streams/{stream_id}?ctx=work",
+                 json={"start_date": "2020-01-01", "end_date": "2020-01-02"})
+    gantt3 = client.get("/api/gantt?ctx=work").json()
+    stream_data3 = gantt3["projects"][0]["streams"][0]
+    assert stream_data3["start_date"] == "2026-10-01"
+    assert stream_data3["end_date"] == "2026-11-30"
+
+
+def test_phase_crud_and_cross_context_404(client):
+    project = client.post("/api/gantt/projects?ctx=work", json={"name": "ACME"}).json()
+    stream = client.post("/api/gantt/streams?ctx=work", json={"project_id": project["id"], "name": "Analisi"}).json()
+
+    created = client.post("/api/gantt/phases?ctx=work", json={
+        "stream_id": stream["id"], "name": "Raccolta requisiti",
+        "start_date": "2026-09-15", "end_date": "2026-09-30",
+    })
+    assert created.status_code == 201
+    phase_id = created.json()["id"]
+    assert created.json()["start_date"] == "2026-09-15"
+
+    # date invertite rifiutate
+    invalid = client.post("/api/gantt/phases?ctx=work", json={
+        "stream_id": stream["id"], "name": "Invalid",
+        "start_date": "2026-10-01", "end_date": "2026-09-01",
+    })
+    assert invalid.status_code == 400
+
+    renamed = client.patch(f"/api/gantt/phases/{phase_id}?ctx=work", json={"name": "Raccolta v2"})
+    assert renamed.status_code == 200
+    assert renamed.json()["name"] == "Raccolta v2"
+
+    # 404 su fase di uno stream in un altro contesto
+    cross_ctx = client.patch(f"/api/gantt/phases/{phase_id}?ctx=home", json={"name": "x"})
+    assert cross_ctx.status_code == 404
+
+    deleted = client.delete(f"/api/gantt/phases/{phase_id}?ctx=work")
+    assert deleted.status_code == 204
+    assert client.delete(f"/api/gantt/phases/{phase_id}?ctx=work").status_code == 404
+
+
+def test_phase_delete_unlinks_note_not_delete(client):
+    project = client.post("/api/gantt/projects?ctx=work", json={"name": "ACME"}).json()
+    stream = client.post("/api/gantt/streams?ctx=work", json={"project_id": project["id"], "name": "Analisi"}).json()
+    phase = client.post("/api/gantt/phases?ctx=work", json={"stream_id": stream["id"], "name": "Raccolta"}).json()
+    note = client.post("/api/notes?ctx=work", json={"content": "step 1", "milestone_id": phase["id"]}).json()
+
+    assert client.delete(f"/api/gantt/phases/{phase['id']}?ctx=work").status_code == 204
+
+    gantt = client.get("/api/gantt?ctx=work").json()
+    # lo Stream sopravvive (contenitore), semplicemente senza più fasi
+    assert gantt["projects"][0]["streams"][0]["phases"] == []
+
+    updated_note = next(n for n in client.get("/api/notes?ctx=work").json() if n["id"] == note["id"])
+    assert updated_note["milestone_id"] is None
+
+
+def test_standard_phases_creates_three_templates(client):
+    """Il bottone "+ fasi standard" crea in un colpo solo le 4 fasi tipiche
+    (Analisi e Requisiti / Implementazione / UAT / Rilascio in PROD), senza date."""
+    project = client.post("/api/gantt/projects?ctx=work", json={"name": "ACME"}).json()
+    stream = client.post("/api/gantt/streams?ctx=work", json={"project_id": project["id"], "name": "Filtro consumi"}).json()
+
+    res = client.post("/api/gantt/phases/standard?ctx=work", json={"stream_id": stream["id"]})
+    assert res.status_code == 201
+    names = [ph["name"] for ph in res.json()["phases"]]
+    assert names == ["Analisi e Requisiti", "Implementazione", "UAT", "Rilascio in PROD"]
+    assert all(ph["start_date"] is None for ph in res.json()["phases"])
+
+    gantt = client.get("/api/gantt?ctx=work").json()
+    phases = gantt["projects"][0]["streams"][0]["phases"]
+    assert [ph["name"] for ph in phases] == ["Analisi e Requisiti", "Implementazione", "UAT", "Rilascio in PROD"]
+
+    # chiamarlo una seconda volta aggiunge altre 4 fasi, non sostituisce le esistenti
+    client.post("/api/gantt/phases/standard?ctx=work", json={"stream_id": stream["id"]})
+    gantt2 = client.get("/api/gantt?ctx=work").json()
+    assert len(gantt2["projects"][0]["streams"][0]["phases"]) == 8
+
+    # 404 su stream di un altro contesto
+    assert client.post("/api/gantt/phases/standard?ctx=home", json={"stream_id": stream["id"]}).status_code == 404
+
+
+def test_phases_ordered_by_start_date_not_creation(client):
+    """Le fasi vanno mostrate in ordine cronologico di inizio, non nell'ordine
+    in cui sono state create — qui creo apposta "Rilascio in PROD" (a fine
+    lavoro) prima di "Implementazione" (che inizia prima)."""
+    project = client.post("/api/gantt/projects?ctx=work", json={"name": "CREDEM"}).json()
+    stream = client.post("/api/gantt/streams?ctx=work", json={"project_id": project["id"], "name": "FINOPS"}).json()
+
+    analisi = client.post("/api/gantt/phases?ctx=work", json={
+        "stream_id": stream["id"], "name": "Analisi e Requisiti",
+        "start_date": "2026-09-15", "end_date": "2026-09-30",
+    }).json()
+    rilascio = client.post("/api/gantt/phases?ctx=work", json={
+        "stream_id": stream["id"], "name": "Rilascio in PROD",
+        "start_date": "2026-11-02", "end_date": "2026-11-03",
+    }).json()
+    implementazione = client.post("/api/gantt/phases?ctx=work", json={
+        "stream_id": stream["id"], "name": "Implementazione",
+        "start_date": "2026-10-03", "end_date": "2026-10-23",
+    }).json()
+    uat = client.post("/api/gantt/phases?ctx=work", json={
+        "stream_id": stream["id"], "name": "UAT",
+        "start_date": "2026-10-26", "end_date": "2026-10-30",
+    }).json()
+    # fase senza data: deve finire in coda, non rompere l'ordinamento
+    senza_data = client.post("/api/gantt/phases?ctx=work", json={
+        "stream_id": stream["id"], "name": "Idea futura",
+    }).json()
+
+    gantt = client.get("/api/gantt?ctx=work").json()
+    ids_in_order = [ph["id"] for ph in gantt["projects"][0]["streams"][0]["phases"]]
+    assert ids_in_order == [analisi["id"], implementazione["id"], uat["id"], rilascio["id"], senza_data["id"]]
+
+
 def test_gantt_streams_all_endpoint_includes_breadcrumb(client):
     """Usato dal campo di ricerca "stream" nel form nota — deve includere ogni
-    Stream del progetto con etichetta completa "Progetto > Stream"."""
+    Fase (non lo Stream, che è un puro contenitore) con etichetta completa
+    "Progetto > Stream > Fase", perché le note si agganciano alla Fase."""
     project = client.post("/api/gantt/projects?ctx=work", json={"name": "ACME"}).json()
-    client.post("/api/gantt/streams?ctx=work", json={"project_id": project["id"], "name": "Analisi"})
-    client.post("/api/gantt/streams?ctx=work", json={"project_id": project["id"], "name": "Collection"})
+    analisi = client.post("/api/gantt/streams?ctx=work", json={"project_id": project["id"], "name": "Analisi"}).json()
+    collection = client.post("/api/gantt/streams?ctx=work", json={"project_id": project["id"], "name": "Collection"}).json()
+    client.post("/api/gantt/phases?ctx=work", json={"stream_id": analisi["id"], "name": "Raccolta requisiti"})
+    client.post("/api/gantt/phases?ctx=work", json={"stream_id": collection["id"], "name": "Sviluppo"})
 
     res = client.get("/api/gantt/streams/all?ctx=work")
     assert res.status_code == 200
     labels = {s["label"] for s in res.json()["streams"]}
-    assert "ACME > Analisi" in labels
-    assert "ACME > Collection" in labels
+    assert "ACME > Analisi > Raccolta requisiti" in labels
+    assert "ACME > Collection > Sviluppo" in labels
 
     # scoping per contesto: non deve comparire nell'altro contesto
     assert client.get("/api/gantt/streams/all?ctx=home").json()["streams"] == []
+
+
+def test_client_projects_endpoint_for_note_form_autocomplete(client):
+    """Usato dal campo "progetto" nel form nota per suggerire solo i progetti
+    del cliente già inserito — leggero, niente fasi/progress."""
+    client.post("/api/notes?ctx=work", json={
+        "content": "nota 1", "cliente": "CREDEM", "project": "FINOPS DASHBOARD FATTURAZIONE",
+    })
+    client.post("/api/notes?ctx=work", json={
+        "content": "nota 2", "cliente": "AGBG", "project": "ACADEMY",
+    })
+    # un progetto "sfondo" (es. Ferie) non è un progetto cliente reale
+    client.post("/api/gantt/projects?ctx=work", json={"name": "Ferie", "is_background": True})
+
+    res = client.get("/api/gantt/client-projects?ctx=work")
+    assert res.status_code == 200
+    data = res.json()
+    by_name = {p["name"]: p["client_name"] for p in data}
+    assert by_name["FINOPS DASHBOARD FATTURAZIONE"] == "CREDEM"
+    assert by_name["ACADEMY"] == "AGBG"
+    assert "Ferie" not in by_name
+
+    # scoping per contesto
+    assert client.get("/api/gantt/client-projects?ctx=home").json() == []
 
 
 def test_gantt_absence_crud_and_context_scoping(client):
@@ -456,28 +680,30 @@ def test_gantt_absence_color_override(client):
 
 
 def test_stream_linked_notes_ordered_by_period_not_creation(client):
-    """Le note collegate a uno stream vanno mostrate in ordine cronologico
-    (start_date, poi due_date), non nell'ordine in cui sono state creare/il
+    """Le note collegate a una fase vanno mostrate in ordine cronologico
+    (start_date, poi due_date), non nell'ordine in cui sono state create/il
     loro id — qui creo apposta la nota "più tardi" per prima."""
     project = client.post("/api/gantt/projects?ctx=work", json={"name": "ACME"}).json()
     stream = client.post("/api/gantt/streams?ctx=work",
                           json={"project_id": project["id"], "name": "Analisi"}).json()
+    phase = client.post("/api/gantt/phases?ctx=work",
+                         json={"stream_id": stream["id"], "name": "Raccolta"}).json()
 
     # entrambe le date sono nel passato rispetto a "oggi": la nota senza data
     # (il cui sort key ricade sulla data di creazione, cioè oggi) deve finire
     # dopo entrambe, in coda.
     later = client.post("/api/notes?ctx=work", json={
-        "content": "step del 15 agosto", "milestone_id": stream["id"], "start_date": "2026-08-15",
+        "content": "step del 15 agosto", "milestone_id": phase["id"], "start_date": "2026-08-15",
     }).json()
     earlier = client.post("/api/notes?ctx=work", json={
-        "content": "step del 1 agosto", "milestone_id": stream["id"], "start_date": "2026-08-01",
+        "content": "step del 1 agosto", "milestone_id": phase["id"], "start_date": "2026-08-01",
     }).json()
     no_date = client.post("/api/notes?ctx=work", json={
-        "content": "step senza data", "milestone_id": stream["id"],
+        "content": "step senza data", "milestone_id": phase["id"],
     }).json()
 
     gantt = client.get("/api/gantt?ctx=work").json()
-    linked = gantt["projects"][0]["streams"][0]["linked_notes"]
+    linked = gantt["projects"][0]["streams"][0]["phases"][0]["linked_notes"]
     ids_in_order = [n["id"] for n in linked]
     # earlier (1 agosto) prima di later (15 agosto), nonostante creata dopo;
     # la nota senza data va in coda (fallback sulla data di creazione = oggi)
@@ -485,41 +711,105 @@ def test_stream_linked_notes_ordered_by_period_not_creation(client):
     assert ids_in_order[-1] == no_date["id"]
 
 
-def test_stream_dateless_and_note_link_progress(client):
-    """Uno Stream è creabile senza date (esiste come contenitore di note) e la
-    sua % si calcola sulle note collegate via milestone_id."""
-    project = client.post("/api/gantt/projects?ctx=work", json={"name": "ACME"}).json()
+def test_note_linked_directly_to_stream_acts_as_phase(client):
+    """Una nota può agganciarsi direttamente a uno Stream (senza passare da una
+    Fase) per lavoro semplice che non merita una scomposizione in fasi — la
+    nota stessa compare come "fase" nel Gantt, con le sue date e il suo status."""
+    project = client.post("/api/gantt/projects?ctx=work", json={"name": "DB"}).json()
+    stream = client.post("/api/gantt/streams?ctx=work",
+                          json={"project_id": project["id"], "name": "Attività extra"}).json()
 
-    stream = client.post("/api/gantt/streams?ctx=work", json={
-        "project_id": project["id"], "name": "Analisi",
-    })
-    assert stream.status_code == 201
-    assert stream.json()["start_date"] is None
-    stream_id = stream.json()["id"]
-
-    n1 = client.post("/api/notes?ctx=work", json={"content": "step 1", "status": "done", "milestone_id": stream_id}).json()
-    n2 = client.post("/api/notes?ctx=work", json={"content": "step 2", "status": "todo"}).json()
-    client.patch(f"/api/notes/{n2['id']}?ctx=work", json={"milestone_id": stream_id})
+    note = client.post("/api/notes?ctx=work", json={
+        "content": "copertura a supporto FASE2", "stream_id": stream["id"],
+        "start_date": "2026-09-01", "due_date": "2026-12-31",
+    }).json()
+    assert note["stream_id"] == stream["id"]
+    assert note["milestone_id"] is None
 
     gantt = client.get("/api/gantt?ctx=work").json()
     stream_data = gantt["projects"][0]["streams"][0]
+    assert stream_data["progress_total"] == 1
+    phase_like = stream_data["phases"][0]
+    assert phase_like["name"] == "copertura a supporto FASE2"
+    assert phase_like["start_date"] == "2026-09-01"
+    assert phase_like["end_date"] == "2026-12-31"
+    assert phase_like["is_note"] is True
+    assert phase_like["note_id"] == note["id"]
+
+    # non deve comparire ANCHE come nota-con-scadenza "libera" del progetto
+    # (sarebbe una duplicazione: è già rappresentata come fase dello stream)
+    assert gantt["projects"][0]["notes"] == []
+
+    # segnarla "done" alza il progress dello stream
+    client.patch(f"/api/notes/{note['id']}?ctx=work", json={"status": "done"})
+    gantt2 = client.get("/api/gantt?ctx=work").json()
+    assert gantt2["projects"][0]["streams"][0]["progress"] == 100
+
+    # milestone_id e stream_id sono mutuamente esclusivi
+    phase = client.post("/api/gantt/phases?ctx=work",
+                         json={"stream_id": stream["id"], "name": "Fase vera"}).json()
+    client.patch(f"/api/notes/{note['id']}?ctx=work", json={"milestone_id": phase["id"]})
+    note_after = next(n for n in client.get("/api/notes?ctx=work").json() if n["id"] == note["id"])
+    assert note_after["milestone_id"] == phase["id"]
+    assert note_after["stream_id"] is None
+
+
+def test_stream_delete_unlinks_directly_attached_note(client):
+    project = client.post("/api/gantt/projects?ctx=work", json={"name": "DB"}).json()
+    stream = client.post("/api/gantt/streams?ctx=work",
+                          json={"project_id": project["id"], "name": "Attività extra"}).json()
+    note = client.post("/api/notes?ctx=work", json={
+        "content": "copertura extra", "stream_id": stream["id"],
+    }).json()
+
+    assert client.delete(f"/api/gantt/streams/{stream['id']}?ctx=work").status_code == 204
+
+    updated = next(n for n in client.get("/api/notes?ctx=work").json() if n["id"] == note["id"])
+    assert updated["stream_id"] is None
+
+
+def test_stream_dateless_and_note_link_progress(client):
+    """Una Fase è creabile senza date (esiste come contenitore di note) e la
+    sua % — aggregata anche a livello di Stream — si calcola sulle note
+    collegate via milestone_id."""
+    project = client.post("/api/gantt/projects?ctx=work", json={"name": "ACME"}).json()
+    stream = client.post("/api/gantt/streams?ctx=work", json={
+        "project_id": project["id"], "name": "Analisi",
+    }).json()
+
+    phase = client.post("/api/gantt/phases?ctx=work", json={
+        "stream_id": stream["id"], "name": "Raccolta",
+    })
+    assert phase.status_code == 201
+    assert phase.json()["start_date"] is None
+    phase_id = phase.json()["id"]
+
+    n1 = client.post("/api/notes?ctx=work", json={"content": "step 1", "status": "done", "milestone_id": phase_id}).json()
+    n2 = client.post("/api/notes?ctx=work", json={"content": "step 2", "status": "todo"}).json()
+    client.patch(f"/api/notes/{n2['id']}?ctx=work", json={"milestone_id": phase_id})
+
+    gantt = client.get("/api/gantt?ctx=work").json()
+    stream_data = gantt["projects"][0]["streams"][0]
+    phase_data = stream_data["phases"][0]
     assert stream_data["progress_total"] == 2
     assert stream_data["progress_done"] == 1
     assert stream_data["progress"] == 50
-    assert {n["id"] for n in stream_data["linked_notes"]} == {n1["id"], n2["id"]}
+    assert phase_data["progress_total"] == 2
+    assert phase_data["progress"] == 50
+    assert {n["id"] for n in phase_data["linked_notes"]} == {n1["id"], n2["id"]}
 
-    # aggiungere le date dopo deve funzionare (stream creato senza, valorizzato in seguito)
-    dated = client.patch(f"/api/gantt/streams/{stream_id}?ctx=work",
+    # aggiungere le date dopo deve funzionare (fase creata senza, valorizzata in seguito)
+    dated = client.patch(f"/api/gantt/phases/{phase_id}?ctx=work",
                           json={"start_date": "2026-06-01", "end_date": "2026-06-10"})
     assert dated.status_code == 200
     assert dated.json()["start_date"] == "2026-06-01"
 
-    # clear_milestone rimuove la nota dallo stream
+    # clear_milestone rimuove la nota dalla fase
     client.patch(f"/api/notes/{n2['id']}?ctx=work", json={"clear_milestone": True})
     gantt2 = client.get("/api/gantt?ctx=work").json()
-    stream_data2 = gantt2["projects"][0]["streams"][0]
-    assert stream_data2["progress_total"] == 1
-    assert stream_data2["progress"] == 100
+    phase_data2 = gantt2["projects"][0]["streams"][0]["phases"][0]
+    assert phase_data2["progress_total"] == 1
+    assert phase_data2["progress"] == 100
 
 
 def test_project_progress_aggregates_all_streams(client):
@@ -529,14 +819,16 @@ def test_project_progress_aggregates_all_streams(client):
                             json={"project_id": project["id"], "name": "A"}).json()
     stream_b = client.post("/api/gantt/streams?ctx=work",
                             json={"project_id": project["id"], "name": "B"}).json()
+    phase_a = client.post("/api/gantt/phases?ctx=work", json={"stream_id": stream_a["id"], "name": "Fase A"}).json()
+    phase_b = client.post("/api/gantt/phases?ctx=work", json={"stream_id": stream_b["id"], "name": "Fase B"}).json()
 
-    n1 = client.post("/api/notes?ctx=work", json={"content": "a1", "status": "done", "milestone_id": stream_a["id"]}).json()
-    n2 = client.post("/api/notes?ctx=work", json={"content": "b1", "status": "todo", "milestone_id": stream_b["id"]}).json()
-    n3 = client.post("/api/notes?ctx=work", json={"content": "b2", "status": "todo", "milestone_id": stream_b["id"]}).json()
+    n1 = client.post("/api/notes?ctx=work", json={"content": "a1", "status": "done", "milestone_id": phase_a["id"]}).json()
+    n2 = client.post("/api/notes?ctx=work", json={"content": "b1", "status": "todo", "milestone_id": phase_b["id"]}).json()
+    n3 = client.post("/api/notes?ctx=work", json={"content": "b2", "status": "todo", "milestone_id": phase_b["id"]}).json()
 
     gantt = client.get("/api/gantt?ctx=work").json()
     proj = gantt["projects"][0]
-    # 1 done su 3 totali, sommando entrambi gli stream del progetto
+    # 1 done su 3 totali, sommando entrambi gli stream/fasi del progetto
     assert proj["progress"] == 33
 
 
@@ -544,7 +836,9 @@ def test_gantt_stream_delete_unlinks_note_not_delete(client):
     project = client.post("/api/gantt/projects?ctx=work", json={"name": "ACME"}).json()
     stream = client.post("/api/gantt/streams?ctx=work",
                           json={"project_id": project["id"], "name": "Analisi"}).json()
-    note = client.post("/api/notes?ctx=work", json={"content": "step 1", "milestone_id": stream["id"]}).json()
+    phase = client.post("/api/gantt/phases?ctx=work",
+                         json={"stream_id": stream["id"], "name": "Raccolta"}).json()
+    note = client.post("/api/notes?ctx=work", json={"content": "step 1", "milestone_id": phase["id"]}).json()
 
     assert client.delete(f"/api/gantt/streams/{stream['id']}?ctx=work").status_code == 204
 
@@ -552,8 +846,8 @@ def test_gantt_stream_delete_unlinks_note_not_delete(client):
     proj = gantt["projects"][0]
     assert proj["streams"] == []
 
-    # la nota resta, solo scollegata (lo stream è stato cancellato per davvero,
-    # non "svuotato" — è la stessa entità, non più un contenitore separato)
+    # la nota resta, solo scollegata (lo stream — e con esso la sua fase — è
+    # stato cancellato per davvero, non "svuotato")
     updated_note = next(n for n in client.get("/api/notes?ctx=work").json() if n["id"] == note["id"])
     assert updated_note["milestone_id"] is None
 
@@ -562,22 +856,30 @@ def test_gantt_project_delete_unlinks_streams(client):
     project = client.post("/api/gantt/projects?ctx=work", json={"name": "ACME"}).json()
     stream = client.post("/api/gantt/streams?ctx=work",
                           json={"project_id": project["id"], "name": "Analisi"}).json()
-    note = client.post("/api/notes?ctx=work", json={"content": "step 1", "milestone_id": stream["id"]}).json()
+    phase = client.post("/api/gantt/phases?ctx=work",
+                         json={"stream_id": stream["id"], "name": "Raccolta"}).json()
+    note = client.post("/api/notes?ctx=work", json={"content": "step 1", "milestone_id": phase["id"]}).json()
 
-    release = client.post("/api/gantt/streams?ctx=work", json={
+    release_stream = client.post("/api/gantt/streams?ctx=work", json={
         "project_id": project["id"], "name": "Release",
+    }).json()
+    release_phase = client.post("/api/gantt/phases?ctx=work", json={
+        "stream_id": release_stream["id"], "name": "Release",
         "start_date": "2026-05-16", "end_date": "2026-05-20",
     }).json()
     release_note = client.post("/api/notes?ctx=work", json={"content": "release note"}).json()
-    client.patch(f"/api/notes/{release_note['id']}?ctx=work", json={"milestone_id": release["id"]})
+    client.patch(f"/api/notes/{release_note['id']}?ctx=work", json={"milestone_id": release_phase["id"]})
 
     assert client.delete(f"/api/gantt/projects/{project['id']}?ctx=work").status_code == 204
 
     notes = client.get("/api/notes?ctx=work").json()
     assert next(n for n in notes if n["id"] == note["id"])["milestone_id"] is None
     assert next(n for n in notes if n["id"] == release_note["id"])["milestone_id"] is None
-    # anche la nota auto-creata dallo stream deve restare (non cancellata)
-    assert any(n["content"] == "Release" for n in notes)
+    # anche la nota auto-creata dalla fase deve restare (non cancellata) — non
+    # compare nel tab Note di default (v. test_milestone_tracking_note_hidden_*),
+    # ma resta recuperabile cercandola esplicitamente per tag
+    tagged_notes = client.get("/api/notes?ctx=work&tag=milestone").json()
+    assert any(n["content"] == "Release" for n in tagged_notes)
 
 
 def test_board_filters(client):
@@ -643,6 +945,74 @@ def test_board_filters(client):
     assert beta["id"] in ids and loose["id"] in ids and alpha["id"] not in ids
 
 
+def test_board_filters_by_phase_and_stream(client):
+    project = client.post("/api/gantt/projects?ctx=work", json={"name": "ACME"}).json()
+    stream = client.post("/api/gantt/streams?ctx=work",
+                          json={"project_id": project["id"], "name": "Analisi"}).json()
+    phase = client.post("/api/gantt/phases?ctx=work",
+                         json={"stream_id": stream["id"], "name": "Raccolta"}).json()
+    other_stream = client.post("/api/gantt/streams?ctx=work",
+                                json={"project_id": project["id"], "name": "Attività extra"}).json()
+
+    on_phase = client.post("/api/notes?ctx=work", json={
+        "content": "task sulla fase", "milestone_id": phase["id"], "status": "todo",
+    }).json()
+    on_stream = client.post("/api/notes?ctx=work", json={
+        "content": "task sullo stream diretto", "stream_id": other_stream["id"], "status": "todo",
+    }).json()
+    unrelated = client.post("/api/notes?ctx=work", json={
+        "content": "nota non collegata", "status": "todo",
+    }).json()
+
+    by_phase = client.get(f"/api/board?ctx=work&milestone_id={phase['id']}")
+    assert [n["id"] for n in by_phase.json()["todo"]] == [on_phase["id"]]
+
+    by_stream = client.get(f"/api/board?ctx=work&stream_id={other_stream['id']}")
+    assert [n["id"] for n in by_stream.json()["todo"]] == [on_stream["id"]]
+
+    # senza filtro compaiono entrambe (più quella non collegata)
+    all_todo = client.get("/api/board?ctx=work").json()["todo"]
+    assert {n["id"] for n in all_todo} == {on_phase["id"], on_stream["id"], unrelated["id"]}
+
+
+def test_milestone_tracking_note_hidden_from_board_and_activity(client):
+    """La nota di tracking auto-creata per uno Stream (tag "milestone") è già
+    rappresentata dalla barra dello Stream nel Gantt — non deve comparire né
+    in Board, né in Attività, né nel tab Note, altrimenti sembra una vera
+    task da fare."""
+    project = client.post("/api/gantt/projects?ctx=work", json={"name": "ACME"}).json()
+    stream = client.post("/api/gantt/streams?ctx=work", json={
+        "project_id": project["id"], "name": "Release",
+    }).json()
+    client.post("/api/gantt/phases?ctx=work", json={
+        "stream_id": stream["id"], "name": "Release",
+        "start_date": "2026-06-01", "end_date": "2026-06-10",
+    })
+    # la nota di tracking è quella creata automaticamente da add_phase,
+    # riconoscibile dal tag "milestone" e dal contenuto = nome della fase
+    real_note = client.post("/api/notes?ctx=work", json={
+        "content": "task vera collegata allo stream", "project": "ACME",
+        "due_date": "2026-06-05", "status": "todo",
+    }).json()
+
+    board = client.get("/api/board?ctx=work").json()
+    board_ids = {n["id"] for col in board.values() for n in col}
+    assert real_note["id"] in board_ids
+    assert all(n["content"] != "Release" for col in board.values() for n in col)
+
+    activity = client.get("/api/notes/today-activity?ctx=work").json()
+    activity_ids = {n["id"] for bucket in activity.values() for n in bucket}
+    assert all(n["content"] != "Release" for bucket in activity.values() for n in bucket)
+
+    notes = client.get("/api/notes?ctx=work").json()
+    notes_ids = {n["id"] for n in notes}
+    assert real_note["id"] in notes_ids
+    assert all(n["content"] != "Release" for n in notes)
+
+    gantt = client.get("/api/gantt?ctx=work").json()
+    assert gantt["projects"][0]["streams"][0]["name"] == "Release"
+
+
 def test_document_upload_list_download_and_delete(client, tmp_path):
     note = client.post("/api/notes?ctx=work", json={"content": "doc note", "project": "ACME"}).json()
 
@@ -692,6 +1062,79 @@ def test_document_path_traversal_is_rejected(client, tmp_path):
     assert client.post(f"/api/docs/{doc_id}/open-folder").status_code == 403
     assert client.delete(f"/api/docs/{doc_id}?remove_file=true").status_code == 403
     assert canary.read_text() == "outside doc_root"
+
+
+def test_folder_scan_finds_untracked_files_ignoring_noise(client, tmp_path):
+    """Un file già presente fisicamente in doc_root (mai allegato tramite
+    noted) deve comparire nello scan; rumore (dotfile, cartelle nascoste/di
+    sistema) e file già tracciati come Document no."""
+    doc_root = tmp_path / "docs"
+    doc_root.mkdir(exist_ok=True)
+    (doc_root / "relazione.txt").write_text("contenuto")
+    (doc_root / ".DS_Store").write_text("noise")
+    hidden_dir = doc_root / ".git"
+    hidden_dir.mkdir()
+    (hidden_dir / "config").write_text("noise")
+    sub = doc_root / "progetto"
+    sub.mkdir()
+    (sub / "specifiche.pdf").write_text("contenuto pdf")
+
+    # un file allegato tramite noted (tracciato in Document) non deve
+    # ricomparire come "trovato" — sarebbe un duplicato nella lista
+    note = client.post("/api/notes?ctx=work", json={"content": "doc note"}).json()
+    uploaded = client.post(
+        f"/api/notes/{note['id']}/docs",
+        files={"file": ("allegata.txt", b"gia' nota", "text/plain")},
+    ).json()
+
+    res = client.get("/api/docs/folder-scan")
+    assert res.status_code == 200
+    found = {d["rel_path"]: d for d in res.json()}
+
+    assert "relazione.txt" in found
+    assert "progetto/specifiche.pdf" in found
+    assert found["relazione.txt"]["orig_name"] == "relazione.txt"
+    assert found["relazione.txt"]["size_bytes"] == len("contenuto")
+
+    assert ".DS_Store" not in found
+    assert not any(rel.startswith(".git") for rel in found)
+    assert uploaded["rel_path"] not in found
+
+
+def test_analyze_docs_accepts_folder_scanned_files(client, monkeypatch, tmp_path):
+    """/api/analyze-docs deve accettare anche file trovati via folder-scan
+    (folder_paths), non solo documenti già allegati (doc_ids)."""
+    doc_root = tmp_path / "docs"
+    doc_root.mkdir(exist_ok=True)
+    (doc_root / "appunti.txt").write_text("testo di prova per l'analisi")
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+    class _FakeContent:
+        text = '{"summary": "ok", "insights": [], "items": []}'
+    class _FakeResponse:
+        content = [_FakeContent()]
+    class _FakeMessages:
+        def create(self_inner, **kwargs):
+            return _FakeResponse()
+    class _FakeAnthropic:
+        def __init__(self_inner, *a, **kw):
+            self_inner.messages = _FakeMessages()
+
+    monkeypatch.setattr("anthropic.Anthropic", _FakeAnthropic)
+
+    res = client.post("/api/analyze-docs", json={
+        "doc_ids": [], "folder_paths": ["appunti.txt"], "depth": "low",
+    })
+    assert res.status_code == 200
+    assert res.json()["summary"] == "ok"
+    # nessuna riga Document per un file solo-scansionato: niente da salvare
+    assert "saved_to_doc" not in res.json()
+
+
+def test_analyze_docs_rejects_when_nothing_selected(client):
+    res = client.post("/api/analyze-docs", json={})
+    assert res.status_code == 400
 
 
 def test_backup_json_and_restore_json(client):
@@ -900,8 +1343,8 @@ def test_format_gantt_reads_streams_shape(client):
         "projects": [{
             "name": "ACME",
             "streams": [
-                {"name": "Analisi", "start_date": None, "end_date": None},
-                {"name": "Release", "start_date": "2026-09-01", "end_date": "2026-09-10"},
+                {"name": "Stream A", "phases": [{"name": "Analisi", "start_date": None, "end_date": None}]},
+                {"name": "Stream B", "phases": [{"name": "Release", "start_date": "2026-09-01", "end_date": "2026-09-10"}]},
             ],
         }]
     }
