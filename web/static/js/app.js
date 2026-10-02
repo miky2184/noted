@@ -508,8 +508,8 @@ function renderDueNotes(notes) {
       const statusHtml = n.status ? `<span class="status status-${n.status}" onclick="cycleStatus(${n.id},'${n.status||''}')" title="Cambia stato">${STATUS_LABEL[n.status]}</span>` : `<span class="status status-empty" onclick="cycleStatus(${n.id},'')" title="Aggiungi stato">+ stato</span>`;
       const priorityHtml = `<span class="priority priority-${n.priority}" onclick="cyclePriority(${n.id},'${n.priority}')" title="Cambia priorità">${n.priority}</span>`;
       const projHtml = n.project
-        ? `<span class="project-badge" onclick="editProject(this,${n.id},'${escHtml(n.project)}')" title="Modifica progetto">${escHtml(n.project)}</span>`
-        : `<span class="project-badge project-empty" onclick="editProject(this,${n.id},'')" title="Aggiungi progetto">+progetto</span>`;
+        ? `<span class="project-badge" onclick="editProject(this,${n.id},'${escHtml(n.project)}','${escHtml(n.cliente||'')}')" title="Modifica progetto">${escHtml(n.project)}</span>`
+        : `<span class="project-badge project-empty" onclick="editProject(this,${n.id},'','${escHtml(n.cliente||'')}')" title="Aggiungi progetto">+progetto</span>`;
       const assigneeHtml = _renderAssigneeBadges(n.assignee, n.id);
       const tagsGroup = `<span class="tags-group" onclick="editTags(this,${n.id},'${escHtml(n.tags.join(','))}')" title="Modifica tag">${
         n.tags.length
@@ -742,8 +742,8 @@ function _noteCardHtml(n, today) {
     ? `<span class="project-badge" style="background:var(--accent-dim);color:var(--accent);" onclick="editCliente(this,${n.id},'${escHtml(n.cliente)}')" title="Modifica cliente">🏢 ${escHtml(n.cliente)}</span>`
     : `<span class="project-badge project-empty" onclick="editCliente(this,${n.id},'')" title="Aggiungi cliente">+cliente</span>`;
   const projHtml = n.project
-    ? `<span class="project-badge" onclick="editProject(this,${n.id},'${escHtml(n.project)}')" title="Modifica progetto">${escHtml(n.project)}</span>`
-    : `<span class="project-badge project-empty" onclick="editProject(this,${n.id},'')" title="Aggiungi progetto">+progetto</span>`;
+    ? `<span class="project-badge" onclick="editProject(this,${n.id},'${escHtml(n.project)}','${escHtml(n.cliente||'')}')" title="Modifica progetto">${escHtml(n.project)}</span>`
+    : `<span class="project-badge project-empty" onclick="editProject(this,${n.id},'','${escHtml(n.cliente||'')}')" title="Aggiungi progetto">+progetto</span>`;
   // Una nota si aggancia o a una Fase (milestone_id) o direttamente a uno
   // Stream (stream_id, per lavoro semplice che non merita una scomposizione
   // in fasi) — mai entrambi, v. edit_note lato backend.
@@ -1731,12 +1731,15 @@ function editTags(container, noteId, currentTags) {
   };
 }
 
-function editProject(el, noteId, currentProject) {
+function editProject(el, noteId, currentProject, currentCliente) {
   const input = document.createElement('input');
   input.type = 'text';
   input.value = currentProject;
   input.placeholder = 'progetto';
+  input.setAttribute('list', 'project-datalist');
+  input.setAttribute('autocomplete', 'off');
   input.style.cssText = 'background:var(--surface2);border:1px solid var(--accent);border-radius:6px;color:var(--text);font-size:0.72rem;padding:2px 8px;outline:none;width:120px;';
+  _populateProjectDatalist(currentCliente);
   el.replaceWith(input);
   input.focus();
   input.select();
@@ -1762,6 +1765,8 @@ function editCliente(el, noteId, currentCliente) {
   input.type = 'text';
   input.value = currentCliente;
   input.placeholder = 'cliente';
+  input.setAttribute('list', 'cliente-datalist');
+  input.setAttribute('autocomplete', 'off');
   input.style.cssText = 'background:var(--surface2);border:1px solid var(--accent);border-radius:6px;color:var(--text);font-size:0.72rem;padding:2px 8px;outline:none;width:120px;';
   el.replaceWith(input);
   input.focus();
@@ -2147,15 +2152,22 @@ async function loadClientProjectsDatalist() {
   } catch {}
 }
 
-function _refreshProjectDatalist() {
+// `cliente` esplicito per filtrare l'edit inline di una nota esistente (dove
+// il cliente di riferimento è quello della nota, non il campo del form in
+// alto); omesso, legge il campo "cliente" del form di inserimento rapido.
+function _populateProjectDatalist(cliente) {
   const list = document.getElementById('project-datalist');
   if (!list) return;
-  const cliente = (document.getElementById('note-cliente')?.value || '').trim().toLowerCase();
-  const matches = cliente
-    ? _allClientProjects.filter(p => (p.client_name || '').toLowerCase() === cliente)
+  const c = (cliente || '').trim().toLowerCase();
+  const matches = c
+    ? _allClientProjects.filter(p => (p.client_name || '').toLowerCase() === c)
     : _allClientProjects;
   const names = [...new Set(matches.map(p => p.name))].sort();
   list.innerHTML = names.map(n => `<option value="${escHtml(n)}"></option>`).join('');
+}
+
+function _refreshProjectDatalist() {
+  _populateProjectDatalist(document.getElementById('note-cliente')?.value);
 }
 
 function toggleAbsencesSection() {
@@ -3036,6 +3048,9 @@ function renderGanttChart(data) {
         // backend (solo quelle visibili nel perimetro corrente e non nascoste)
         const visibleLinkedNotes = (ph.linked_notes || []).filter(ln => {
           if (hiddenNotes.has(ln.id)) return false;
+          // v. commento sullo stesso pattern per le note di progetto sopra:
+          // solo inizio senza scadenza = lavoro aperto, niente limite indietro.
+          if (ln.start_date && !ln.due_date) return _inRange(ln.start_date, endDStr);
           const d = ln.start_date || ln.due_date || ln.created_at;
           return _inRange(d, d);
         });
@@ -3072,17 +3087,35 @@ function renderGanttChart(data) {
       }
     });
 
-    // One row per note with due_date (solo quelle visibili nel perimetro e non
-    // nascoste). Se la nota ha anche start_date, si mostra come barra (start ->
-    // due), non solo come puntino sulla scadenza. Il marker sul singolo punto è
-    // l'emoji di stato — per "todo" (o nessuno stato) resta il rombo rosso.
-    for (const n of p.notes.filter(n => !hiddenNotes.has(n.id) && _inRange(n.start_date || n.due_date, n.due_date))) {
+    // Una riga per ogni nota del progetto non già rappresentata altrove (Fase o
+    // Stream diretto) — visibile comunque anche senza alcuna data (piazzata
+    // sulla data di creazione) o con la sola start_date (piazzata lì): la
+    // barra "start → due" si mostra solo quando entrambe le date ci sono,
+    // altrimenti un puntino/emoji di stato sull'unica data disponibile.
+    for (const n of p.notes.filter(n => {
+      if (hiddenNotes.has(n.id)) return false;
+      // Solo inizio, nessuna scadenza: è lavoro aperto/in corso, senza una
+      // fine nota — non va nascosto solo perché è iniziato più di qualche
+      // giorno fa (il perimetro di default guarda solo 3gg indietro). Resta
+      // visibile finché il suo inizio non è nel futuro oltre la finestra
+      // corrente, ignorando il limite all'indietro.
+      if (n.start_date && !n.due_date) return _inRange(n.start_date, endDStr);
+      const s = n.start_date || n.due_date || n.created_at;
+      const e = n.due_date || n.start_date || n.created_at;
+      return _inRange(s, e);
+    })) {
+      const anchor = n.start_date || n.due_date || n.created_at;
+      const hasBar = n.start_date && n.due_date;
       const assigneeTip = n.assignee ? ` · @${n.assignee}` : '';
-      const tooltip = `(${n.start_date ? n.start_date + ' → ' : ''}${n.due_date})${assigneeTip}`;
+      const dateTip = hasBar ? `${n.start_date} → ${n.due_date}`
+        : n.start_date ? `da ${n.start_date}`
+        : n.due_date ? n.due_date
+        : `creata ${anchor}`;
+      const tooltip = `(${dateTip})${assigneeTip}`;
       const labelText = `#${n.id} ${n.content}`;
       const doneStyle = n.status === 'done' ? 'opacity:0.45;text-decoration:line-through' : '';
       const isPlainTodo = !n.status || n.status === 'todo';
-      const markerHtml = n.start_date
+      const markerHtml = hasBar
         ? (() => {
             const barLeft = pct(n.start_date);
             const barRight = pct(n.due_date);
@@ -3095,8 +3128,8 @@ function renderGanttChart(data) {
                     </div>`;
           })()
         : (isPlainTodo
-            ? `<div class="gantt-diamond overdue" style="left:${pct(n.due_date)}%;background:var(--red);" title="${escHtml(tooltip)}"></div>`
-            : `<div class="gantt-note-emoji" style="left:${pct(n.due_date)}%;" title="${escHtml(tooltip)}">${STATUS_EMOJI[n.status] || '⬜'}</div>`);
+            ? `<div class="gantt-diamond overdue" style="left:${pct(anchor)}%;background:var(--red);" title="${escHtml(tooltip)}"></div>`
+            : `<div class="gantt-note-emoji" style="left:${pct(anchor)}%;" title="${escHtml(tooltip)}">${STATUS_EMOJI[n.status] || '⬜'}</div>`);
       rowsHtml += `
       <div class="gantt-row gantt-notes-row">
         <div class="gantt-row-label" style="${doneStyle}">

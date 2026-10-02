@@ -1202,9 +1202,13 @@ def get_gantt_data(session: Session, ctx: str = "default") -> dict:
     result = []
     for p in projects:
         streams = [] if p.is_background else get_streams(session, p.id)
+        # Ogni nota del progetto non già rappresentata altrove (Fase o Stream
+        # diretto) — anche senza alcuna data, o con solo start_date: deve
+        # comunque comparire nel Gantt (il frontend la piazza sulla data che
+        # ha, o sulla data di creazione in mancanza di entrambe).
         notes_with_due_stmt = (
             select(Note)
-            .where(Note.due_date.isnot(None), Note.context == ctx)
+            .where(Note.context == ctx)
             .where(Note.project.ilike(p.name))
             .where(Note.milestone_id.is_(None))
             .where(Note.stream_id.is_(None))
@@ -1249,7 +1253,7 @@ def get_gantt_data(session: Session, ctx: str = "default") -> dict:
             "streams": streams_data,
             "progress": project_progress,
             "notes": [
-                {"id": n.id, "content": n.content, "due_date": str(n.due_date), "status": n.status,
+                {"id": n.id, "content": n.content, "due_date": str(n.due_date) if n.due_date else None, "status": n.status,
                  "start_date": str(n.start_date) if n.start_date else None,
                  "assignee": n.assignee, "created_at": n.created_at.date().isoformat()}
                 for n in notes_with_due

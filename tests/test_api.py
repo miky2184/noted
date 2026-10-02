@@ -351,6 +351,37 @@ def test_note_cliente_and_project_auto_creates_gantt_project(client):
     assert sum(1 for p in gantt2["projects"] if p["name"].lower() == "finops") == 1
 
 
+def test_gantt_project_notes_visible_without_due_date(client):
+    """Una nota di progetto (non agganciata a Fase/Stream) deve comparire nel
+    Gantt anche senza alcuna data, o con la sola start_date — non solo con
+    una due_date esplicita."""
+    client.post("/api/notes?ctx=work", json={
+        "content": "call con il cliente", "cliente": "CREDEM", "project": "FINOPS",
+    })
+    no_date = client.post("/api/notes?ctx=work", json={
+        "content": "nota senza alcuna data", "project": "FINOPS",
+    }).json()
+    only_start = client.post("/api/notes?ctx=work", json={
+        "content": "nota con solo inizio", "project": "FINOPS", "start_date": "2026-09-01",
+    }).json()
+    with_due = client.post("/api/notes?ctx=work", json={
+        "content": "nota con scadenza", "project": "FINOPS", "due_date": "2026-09-10",
+    }).json()
+
+    gantt = client.get("/api/gantt?ctx=work").json()
+    proj = next(p for p in gantt["projects"] if p["name"] == "FINOPS")
+    ids = {n["id"] for n in proj["notes"]}
+    assert {no_date["id"], only_start["id"], with_due["id"]} <= ids
+
+    no_date_data = next(n for n in proj["notes"] if n["id"] == no_date["id"])
+    assert no_date_data["due_date"] is None
+    assert no_date_data["start_date"] is None
+
+    only_start_data = next(n for n in proj["notes"] if n["id"] == only_start["id"])
+    assert only_start_data["start_date"] == "2026-09-01"
+    assert only_start_data["due_date"] is None
+
+
 def test_note_with_only_done_status_does_not_auto_create_project(client):
     """Una nota (storica) già "done" fin dall'inizio, con cliente+progetto mai
     visti prima, non deve generare un progetto Gantt "fantasma" — solo il
