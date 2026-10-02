@@ -148,13 +148,27 @@ function apiFetch(url, opts = {}) {
 async function downloadBackup(format) {
   document.getElementById('backup-menu').style.display = 'none';
   try {
-    const filename = `noted_backup_${new Date().toLocaleDateString('sv')}.${format}`;
+    // Un <a href="/api/..."> cliccato direttamente è una navigazione del
+    // browser, non una fetch() — bypassa il wrapper che inietta il token di
+    // autenticazione (v. window.fetch sopra), quindi il server rispondeva
+    // 401 e il browser mostrava "Needs authorization" nonostante il toast di
+    // successo. Si scarica invece via fetch (autenticata) + blob.
+    const res = await fetch(`/api/backup/${format}?ctx=${encodeURIComponent(activeCtx)}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Errore ${res.status}`);
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get('content-disposition') || '';
+    const nameMatch = disposition.match(/filename="?([^"]+)"?/);
+    const filename = nameMatch ? nameMatch[1] : `noted_backup_${new Date().toLocaleDateString('sv')}.${format}`;
     const a = document.createElement('a');
-    a.href = `/api/backup/${format}?ctx=${encodeURIComponent(activeCtx)}`;
+    a.href = URL.createObjectURL(blob);
     a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
     toast(`Backup ${format.toUpperCase()} scaricato`, 'success');
   } catch(e) { toast(e.message, 'error'); }
 }
