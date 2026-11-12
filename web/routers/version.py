@@ -39,7 +39,15 @@ def _parse_version(v: str) -> tuple:
 
 
 def check_for_update(force: bool = False) -> dict:
-    """Check GitHub for latest release. Cached for _CHECK_INTERVAL_HOURS."""
+    """Check GitHub for latest release. Cached for _CHECK_INTERVAL_HOURS.
+
+    Opt-in (config ``update_check_enabled``): è l'unica chiamata di rete in
+    uscita dell'app, quindi di default non parte mai."""
+    from db.config import get_update_check_enabled
+    if not get_update_check_enabled():
+        return {"current": CURRENT_VERSION, "latest": CURRENT_VERSION, "has_update": False,
+                "release_url": "", "release_name": "", "last_check": None,
+                "error": "disabled"}
     cfg = _load_config()
     cache = cfg.get("update_check", {})
 

@@ -49,6 +49,16 @@ async def api_notes(
     return result
 
 
+def _sync_links(session, note) -> None:
+    """Gli URL incollati in una nota finiscono nel raccoglitore Link. Mai
+    bloccante: un problema qui non deve impedire di salvare la nota."""
+    try:
+        crud.sync_links_from_note(session, note)
+    except Exception:
+        session.rollback()
+    session.refresh(note)
+
+
 class NoteCreate(BaseModel):
     content: str
     tags: Optional[str] = ""
@@ -77,6 +87,7 @@ async def api_add_note(request: Request, body: NoteCreate):
             status=body.status or None, assignee=body.assignee or None, ctx=ctx,
             milestone_id=body.milestone_id, stream_id=body.stream_id,
         )
+        _sync_links(session, note)
     return note_dict(note)
 
 
@@ -124,6 +135,8 @@ async def api_update_note(note_id: int, body: NoteUpdate, request: Request):
             clear_stream_id=body.clear_stream_id,
             ctx=ctx,
         )
+        if note and body.content is not None:
+            _sync_links(session, note)
     if not note:
         raise HTTPException(status_code=404, detail="Nota non trovata")
     return note_dict(note)
@@ -169,10 +182,10 @@ async def api_email_draft(note_id: int, body: EmailDraftRequest, request: Reques
         if not has_draft and not note.content.strip():
             raise HTTPException(status_code=400, detail="Nota vuota")
 
-        from web.services.recap_service import ensure_api_key, MissingApiKeyError
+        from web.services.recap_service import ensure_llm, LLMUnavailableError
         try:
-            ensure_api_key()
-        except MissingApiKeyError as exc:
+            ensure_llm()
+        except LLMUnavailableError as exc:
             raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
         from ai.email_draft import generate_email_draft, refine_email_draft

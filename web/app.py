@@ -12,10 +12,11 @@ from db import crud
 from db.engine import get_session, init_db
 from web.auth import token_auth_middleware
 from web.deps import get_ctx, templates
-from web.routers import backup, contexts, docs, editor, gantt, notes, recaps, settings, voice, ollama, version
+from web.routers import assistant, backup, links, contexts, docs, editor, gantt, notes, recaps, settings, voice, ollama, version
 from web.services.scheduler_service import lifespan
 
 
+_STATIC = Path(__file__).parent / "static"
 app = FastAPI(title="noted dashboard", lifespan=lifespan)
 app.middleware("http")(token_auth_middleware)
 
@@ -48,6 +49,8 @@ app.include_router(voice.router)
 app.include_router(ollama.router)
 app.include_router(editor.router)
 app.include_router(version.router)
+app.include_router(assistant.router)
+app.include_router(links.router)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -69,4 +72,6 @@ async def index(request: Request, tag: str = "", project: str = ""):
         "filter_project": project,
         "contexts": [{"id": c.id, "name": c.name} for c in contexts_],
         "active_ctx": ctx,
+        # cache-busting: dopo un aggiornamento il browser non serve JS/CSS vecchi
+        "asset_v": int(max(f.stat().st_mtime for f in (_STATIC / "js" / "app.js", _STATIC / "css" / "app.css"))),
     })

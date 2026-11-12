@@ -396,7 +396,7 @@ function switchTab(tab) {
   activeTab = tab;
   const isMobile = window.innerWidth <= 768;
 
-  ['notes', 'activity', 'board', 'gantt', 'docs', 'editor'].forEach(t => {
+  ['notes', 'activity', 'board', 'links', 'gantt', 'docs', 'editor'].forEach(t => {
     const tabBtn = document.getElementById(`tab-${t}`);
     if (tabBtn) tabBtn.classList.toggle('active', t === tab);
     const mb = document.getElementById(`mnav-${t}`);
@@ -406,6 +406,7 @@ function switchTab(tab) {
   document.getElementById('view-notes').style.display = tab === 'notes' ? 'block' : 'none';
   document.getElementById('view-activity').style.display = tab === 'activity' ? 'block' : 'none';
   document.getElementById('view-board').style.display = tab === 'board' ? 'block' : 'none';
+  document.getElementById('view-links').style.display = tab === 'links' ? 'block' : 'none';
   document.getElementById('view-gantt').style.display = tab === 'gantt' ? 'block' : 'none';
   document.getElementById('view-docs').style.display = tab === 'docs' ? 'block' : 'none';
   document.getElementById('view-editor').style.display = tab === 'editor' ? 'flex' : 'none';
@@ -437,6 +438,7 @@ function switchTab(tab) {
   }
   if (tab === 'board') loadBoard();
   if (tab === 'activity') loadActivity();
+  if (tab === 'links') { loadLinks(); loadClientProjectsDatalist(); }
 }
 
 // ── Note bottom sheet (mobile) ────────────────────────────────────────────────
@@ -783,6 +785,7 @@ function _noteCardHtml(n, today) {
       <span class="due-date${n.due_date ? (n.due_date < today ? ' overdue' : (n.due_date <= new Date(Date.now()+2*86400000).toISOString().slice(0,10) ? ' soon' : '')) : ' due-empty'}" onclick="editDue(this,${n.id},'${n.due_date||''}')" title="Clicca per impostare scadenza">${n.due_date ? '📅 '+n.due_date : '+ scadenza'}</span>
       <span class="note-id">#${n.id}</span>
       <button class="hide-btn email-draft-btn" data-note-id="${n.id}" data-email-subject="${escHtml(n.email_subject||'')}" data-email-body="${escHtml(n.email_body||'')}" onclick="generateEmailDraft(this)" title="${n.email_subject||n.email_body ? 'Vedi bozza email salvata' : 'Genera bozza email con AI'}">${n.email_subject||n.email_body ? '📩' : '✉️'}</button>
+      <button class="hide-btn" onclick="extractTasks(${n.id}, this)" title="Estrai attività da questa nota (AI locale)">🧩</button>
       <button class="hide-btn" onclick="hideNote(${n.id})" title="Nascondi nota">🙈</button>
       <button class="delete-btn" onclick="deleteNote(${n.id})" title="Elimina">✕</button>
     </div>
@@ -809,7 +812,7 @@ function _noteCardHtml(n, today) {
   </div>`;
 }
 
-// ── Bozza email via AI (Anthropic) a partire dal contenuto di una nota ────────
+// ── Bozza email via AI locale (Ollama) a partire dal contenuto di una nota ────────
 // Generata una volta, resta salvata sulla nota: un secondo clic mostra quella
 // esistente senza richiamare l'AI. La si può far riscrivere indicando una
 // modifica nel box dedicato dentro il modal.
@@ -995,9 +998,260 @@ async function loadActivity() {
     btn.textContent = activityShowDone ? '🙈 done' : '👁 done';
   }
   try {
-    const res = await apiFetch('/api/notes/today-activity?include_done=' + activityShowDone);
-    renderActivity(await res.json());
+    const [res, ov] = await Promise.all([
+      apiFetch('/api/notes/today-activity?include_done=' + activityShowDone),
+      apiFetch('/api/overview'),
+    ]);
+    const activity = await res.json();
+    const overview = await ov.json();
+    // una nota mostrata nella panoramica (in corso/attesa/ferma) non va ripetuta sotto
+    const shown = new Set(['wip', 'waiting', 'stale'].flatMap(k => overview[k].map(n => n.id)));
+    Object.keys(activity).forEach(k => { activity[k] = activity[k].filter(n => !shown.has(n.id)); });
+    renderActivity(activity);
+    renderOverview(overview);
   } catch (e) { console.error(e); }
+}
+
+// ── Link: raccoglitore per cliente/progetto ───────────────────────────────────
+let _linksTimer = null;
+function loadLinksDebounced() { clearTimeout(_linksTimer); _linksTimer = setTimeout(loadLinks, 200); }
+
+async function loadLinks() {
+  const q = document.getElementById('links-search').value.trim();
+  const sort = document.getElementById('links-sort').value;
+  try {
+    const res = await apiFetch(`/api/links?q=${encodeURIComponent(q)}&sort=${sort}`);
+    renderLinks(await res.json(), sort);
+  } catch (e) { console.error(e); }
+}
+
+function _linkRowHtml(l) {
+  const ctxBadges = [l.cliente ? `🏢 ${escHtml(l.cliente)}` : '', l.project ? escHtml(l.project) : '']
+    .filter(Boolean).map(t => `<span class="project-badge">${t}</span>`).join('');
+  return `
+    <div class="note" style="display:flex;gap:10px;align-items:center;">
+      <div style="flex:1;min-width:0;">
+        <a href="${escHtml(l.url)}" target="_blank" rel="noopener noreferrer"
+           style="font-weight:600;color:var(--text);text-decoration:none;" title="${escHtml(l.url)}">${escHtml(l.title)}</a>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:3px;font-size:0.7rem;color:var(--text-dim);">
+          <span class="count-badge">${escHtml(l.source)}</span>${ctxBadges}
+          <span>${escHtml(l.created_at.slice(0, 10))}</span>
+          ${l.note_id ? `<span title="Trovato in una nota">📝 da nota #${l.note_id}</span>` : ''}
+        </div>
+      </div>
+      <button class="hide-btn" onclick="window.open(${escHtml(JSON.stringify(l.url))},'_blank','noopener')" title="Apri">↗</button>
+      <button class="hide-btn" onclick="copyLink(${l.id})" title="Copia link">📋</button>
+      <button class="hide-btn" onclick="editLink(${l.id})" title="Modifica">✎</button>
+      <button class="delete-btn" onclick="deleteLink(${l.id})" title="Elimina">✕</button>
+    </div>`;
+}
+
+function renderLinks(links, sort) {
+  window._links = Object.fromEntries(links.map(l => [l.id, l]));
+  document.getElementById('links-count').textContent = links.length;
+  const list = document.getElementById('links-list');
+  if (!links.length) {
+    list.innerHTML = '<div class="empty">Nessun link. Incollane uno qui sopra, oppure incolla un indirizzo in una nota: verrà salvato da solo.</div>';
+    return;
+  }
+  if (sort !== 'cliente') { list.innerHTML = links.map(_linkRowHtml).join(''); return; }
+  // raggruppati per cliente / progetto
+  let html = '', lastGroup = null;
+  for (const l of links) {
+    const group = [l.cliente || 'Senza cliente', l.project].filter(Boolean).join(' › ');
+    if (group !== lastGroup) {
+      html += `<div class="section-title" style="font-size:0.74rem;margin:14px 0 4px;">${l.cliente ? '🏢 ' : ''}${escHtml(group)}</div>`;
+      lastGroup = group;
+    }
+    html += _linkRowHtml(l);
+  }
+  list.innerHTML = html;
+}
+
+async function addLink(e) {
+  e.preventDefault();
+  const body = {
+    url: document.getElementById('link-url').value.trim(),
+    title: document.getElementById('link-title').value.trim(),
+    cliente: document.getElementById('link-cliente').value.trim() || null,
+    project: document.getElementById('link-project').value.trim() || null,
+  };
+  const res = await apiFetch('/api/links', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  if (!res.ok) { toast((await res.json().catch(() => ({}))).detail || 'Errore salvataggio link', 'error'); return; }
+  // cliente/progetto restano compilati: si salvano spesso più link di fila per lo stesso progetto
+  document.getElementById('link-url').value = '';
+  document.getElementById('link-title').value = '';
+  toast('Link salvato', 'success');
+  loadLinks();
+}
+
+function copyLink(id) {
+  navigator.clipboard.writeText(window._links[id].url)
+    .then(() => toast('Link copiato', 'success')).catch(() => toast('Errore copia', 'error'));
+}
+
+function editLink(id) {
+  const l = window._links[id];
+  document.getElementById('link-edit-modal')?.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'link-edit-modal';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;z-index:2000;';
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <form style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;max-width:480px;width:90%;display:flex;flex-direction:column;gap:8px;"
+          onsubmit="saveLink(event, ${id})">
+      <div style="font-weight:700;">✎ Modifica link</div>
+      <input class="gantt-input" id="le-title" value="${escHtml(l.title)}" placeholder="Nome">
+      <input class="gantt-input" id="le-url" value="${escHtml(l.url)}" placeholder="Indirizzo" required>
+      <input class="gantt-input" id="le-cliente" list="cliente-datalist" value="${escHtml(l.cliente || '')}" placeholder="cliente" autocomplete="off">
+      <input class="gantt-input" id="le-project" list="project-datalist" value="${escHtml(l.project || '')}" placeholder="progetto" autocomplete="off">
+      <div style="display:flex;gap:8px;margin-top:6px;">
+        <button class="gantt-btn" type="submit" style="width:auto;padding:6px 16px;">Salva</button>
+        <button class="gantt-btn-sm" type="button" onclick="document.getElementById('link-edit-modal').remove()">Annulla</button>
+      </div>
+    </form>`;
+  document.body.appendChild(overlay);
+}
+
+async function saveLink(e, id) {
+  e.preventDefault();
+  const res = await apiFetch(`/api/links/${id}`, {
+    method: 'PATCH', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      title: document.getElementById('le-title').value,
+      url: document.getElementById('le-url').value,
+      cliente: document.getElementById('le-cliente').value,
+      project: document.getElementById('le-project').value,
+    }),
+  });
+  if (!res.ok) { toast((await res.json().catch(() => ({}))).detail || 'Errore', 'error'); return; }
+  document.getElementById('link-edit-modal').remove();
+  loadLinks();
+}
+
+async function deleteLink(id) {
+  if (!await showConfirm('Eliminare il link?', 'Le note che lo contengono non vengono toccate.')) return;
+  const res = await apiFetch(`/api/links/${id}`, {method: 'DELETE'});
+  if (res.ok) { toast('Link eliminato'); loadLinks(); } else toast('Errore', 'error');
+}
+
+async function importLinksFromNotes() {
+  const res = await apiFetch('/api/links/import-from-notes', {method: 'POST'});
+  const data = await res.json();
+  toast(data.created ? `${data.created} link trovati nelle note` : 'Nessun nuovo link nelle note');
+  loadLinks();
+}
+
+// ── Oggi: panoramica + domande alle note (AI locale) ──────────────────────────
+function renderOverview(o) {
+  const box = document.getElementById('overview-box');
+  if (!box) return;
+  const today = window.NOTED_BOOT.today;
+  const chip = (label, n, tab) => `<span class="count-badge" style="cursor:${tab?'pointer':'default'};padding:4px 10px;" ${tab?`onclick="switchTab('${tab}')"`:''}>${label} <strong>${n}</strong></span>`;
+  const list = (title, notes) => notes.length ? `
+    <div class="section-header" style="margin-top:14px;"><span class="section-title" style="font-size:0.78rem;">${title}</span>
+    <span class="count-badge">${notes.length}</span></div>${notes.map(n => _noteCardHtml(n, today)).join('')}` : '';
+  box.innerHTML = `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+      ${chip('📥 Da classificare', o.inbox_count, 'board')}
+      ${chip('Aperte', o.open_count, 'board')}
+      ${o.projects.map(p => chip(escHtml(p.name), p.open)).join('')}
+    </div>
+    ${list('🔄 In corso', o.wip)}
+    ${list('⏳ In attesa / bloccate', o.waiting)}
+    ${list('💤 Ferme da oltre 7 giorni', o.stale)}`;
+}
+
+async function askNotes() {
+  const input = document.getElementById('ask-input');
+  const out = document.getElementById('ask-answer');
+  const q = input.value.trim();
+  if (!q) return;
+  out.style.display = 'block';
+  out.innerHTML = '<span style="color:var(--text-muted);">⏳ Cerco nelle note…</span>';
+  try {
+    const res = await apiFetch('/api/ask', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({question: q}),
+    });
+    const raw = await res.text();
+    let data = {};
+    try { data = JSON.parse(raw); } catch { /* risposta non JSON (errore del server) */ }
+    if (!res.ok) throw new Error(data.detail || `Errore del server (${res.status}). Dettagli in noted.log`);
+    // Le fonti non servono quasi mai: restano a un clic ("Fonti"), solo per le risposte del modello.
+    const refs = data.mode === 'tasks' ? '' : data.sources.map(n => `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:4px;">
+      <strong>[N${n.id}]</strong> ${escHtml(n.created_at.slice(0,10))} — ${escHtml(n.content.slice(0,110))}${n.content.length>110?'…':''}</div>`).join('');
+    // [N12] → piccola etichetta discreta invece di testo in mezzo alla frase
+    const body = renderMarkdown(data.answer).replace(/\[N(\d+)\]/g, '<sup class="ask-ref">#$1</sup>');
+    out.innerHTML = `<div class="ask-md">${body}</div>
+      ${refs ? `<details style="margin-top:8px;"><summary style="cursor:pointer;font-size:0.72rem;color:var(--text-dim);">Fonti (${data.sources.length})</summary>${refs}</details>` : ''}`;
+  } catch (e) {
+    out.innerHTML = `<span style="color:var(--danger,#f87171);">${escHtml(e.message)}</span>`;
+  }
+}
+
+// ── Estrazione task da una nota: l'AI propone, l'utente conferma ──────────────
+async function extractTasks(noteId, btn) {
+  const original = btn.textContent;
+  btn.textContent = '⏳'; btn.disabled = true;
+  try {
+    const res = await apiFetch(`/api/notes/${noteId}/extract-tasks`, {method: 'POST'});
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Errore estrazione');
+    if (!data.tasks.length) { toast('Nessuna attività esplicita trovata nella nota'); return; }
+    _showTaskProposals(noteId, data);
+  } catch (e) {
+    toast(e.message || 'Errore estrazione', 'error');
+  } finally {
+    btn.textContent = original; btn.disabled = false;
+  }
+}
+
+function _showTaskProposals(noteId, data) {
+  document.getElementById('task-proposals-modal')?.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'task-proposals-modal';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;z-index:2000;';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  window._taskProposals = data;
+  overlay.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;max-width:520px;width:90%;max-height:85vh;overflow-y:auto;">
+      <div style="font-weight:700;margin-bottom:4px;">🧩 Attività proposte</div>
+      <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:12px;">Suggerite dall'AI locale dal testo della nota #${noteId}. Deseleziona o modifica prima di creare.${data.project ? ` Erediteranno il progetto <strong>${escHtml(data.project)}</strong>.` : ''}</div>
+      ${data.tasks.map((t, i) => `
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+          <input type="checkbox" id="tp-chk-${i}" checked>
+          <input class="gantt-input" id="tp-title-${i}" value="${escHtml(t.title)}" style="flex:1;">
+          <input type="date" class="gantt-input" id="tp-due-${i}" value="${t.due_date || ''}">
+        </div>`).join('')}
+      <div style="display:flex;gap:8px;margin-top:14px;">
+        <button class="gantt-btn" style="width:auto;padding:6px 16px;" onclick="createProposedTasks()">Crea selezionate</button>
+        <button class="gantt-btn-sm" onclick="document.getElementById('task-proposals-modal').remove()">Annulla</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function createProposedTasks() {
+  const data = window._taskProposals;
+  let created = 0;
+  for (let i = 0; i < data.tasks.length; i++) {
+    if (!document.getElementById(`tp-chk-${i}`).checked) continue;
+    const title = document.getElementById(`tp-title-${i}`).value.trim();
+    if (!title) continue;
+    const res = await apiFetch('/api/notes', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        content: title, status: 'todo', priority: data.tasks[i].priority,
+        due_date: document.getElementById(`tp-due-${i}`).value || null,
+        cliente: data.cliente || null, project: data.project || null,
+      }),
+    });
+    if (res.ok) created++;
+  }
+  document.getElementById('task-proposals-modal')?.remove();
+  toast(`${created} attività create`, 'success');
+  loadNotes(); if (activeTab === 'activity') loadActivity();
 }
 
 function renderActivity(data) {
@@ -1463,7 +1717,6 @@ async function generateWeeklyRecap() {
   await _streamToRecapBox('/api/recap/weekly', 'Recap weekly salvato 💾');
 }
 
-// ── Model selector ────────────────────────────────────────────────────────────
 // ── Schedule ──────────────────────────────────────────────────────────────────
 function _setScheduleToggleUI(enabled) {
   const pill = document.getElementById('schedule-toggle-pill');
@@ -1544,27 +1797,6 @@ function _renderSchedulerStatus(s) {
 }
 
 initSchedule();
-
-async function setModel(modelId) {
-  try {
-    await fetch('/api/config/model', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: modelId }),
-    });
-    const label = document.querySelector(`#model-select option[value="${modelId}"]`)?.textContent || modelId;
-    toast(`Modello: ${label.trim()}`);
-  } catch { toast('Errore cambio modello', 'error'); }
-}
-
-(async function initModel() {
-  try {
-    const res = await fetch('/api/config/model');
-    const data = await res.json();
-    const sel = document.getElementById('model-select');
-    if (sel) sel.value = data.model;
-  } catch {}
-})();
 
 // ── Board ─────────────────────────────────────────────────────────────────────
 async function loadBoard() {
@@ -2445,22 +2677,9 @@ function _renderProjectItem(p, clients) {
         <span style="color:var(--text-dim);flex-shrink:0;">→</span>
         <input class="gantt-input" type="date" value="${p.end_date || ''}" onchange="setProjectDate(${p.id},'end_date',this.value)" style="font-size:0.68rem;padding:2px 3px;width:auto;min-width:0;flex:1;">
       </div>` : ''}
-      <div class="gantt-milestones-list">
-        ${(p.streams || []).map((s, i) => _renderStreamItem(s, _streamColor(p.color, i, (p.streams || []).length))).join('') || `<div style="color:var(--text-dim);font-size:0.72rem;padding:2px 0 6px">Nessuno stream.</div>`}
-      </div>
-      <button class="gantt-add-ms-btn" onclick="toggleAddStream(${p.id},this)">+ stream</button>
-      <form class="gantt-add-ms-form" id="gantt-stream-form-${p.id}" onsubmit="addStream(event,${p.id})">
-        <input class="gantt-input" name="name" placeholder="Nome stream" maxlength="80" required style="font-size:0.75rem;padding:3px 7px;">
-        <div style="font-size:0.62rem;color:var(--text-dim);">Periodo (opzionale, solo se non prevedi fasi):</div>
-        <div style="display:flex;flex-direction:column;gap:4px;">
-          <input class="gantt-input" type="date" name="start" style="font-size:0.75rem;padding:3px 7px;">
-          <input class="gantt-input" type="date" name="end" style="font-size:0.75rem;padding:3px 7px;">
-        </div>
-        <div style="display:flex;gap:4px;">
-          <button type="submit" class="gantt-btn-sm">Aggiungi</button>
-          <button type="button" class="gantt-btn-sm" onclick="toggleAddStream(${p.id},this.closest('form').previousElementSibling)">Annulla</button>
-        </div>
-      </form>` : '';
+      ${!p.is_background ? `<div style="font-size:0.7rem;color:var(--text-dim);padding:0 0 6px;line-height:1.5;">
+        ${p.tasks_total ? `${p.tasks_done}/${p.tasks_total} attività completate (${p.progress}%)` : 'Nessuna attività.'}<br>
+        Le attività sono le note con questo progetto: la barra usa inizio e scadenza.</div>` : ''}` : '';
 
   const colorPickerOpen = p.id === _projectColorPickerOpenId;
   return `
@@ -2722,9 +2941,9 @@ function renderGanttChart(data) {
   const chart = document.getElementById('gantt-chart');
   const absences = data.absences || [];
   const hiddenNotes = _loadHidden();   // una nota nascosta (Board/Note) si nasconde anche qui
-  const hasDatedWork = data.projects.some(p => _datedStreams(p).length);
+  const hasDatedWork = data.projects.some(p => _datedStreams(p).length || (!p.is_background && (p.notes || []).length));
   if (!hasDatedWork && !absences.length) {
-    chart.innerHTML = '<div class="gantt-empty">Aggiungi un progetto e le sue fasi (con date) per visualizzare il Gantt.<br>Le note con scadenza appariranno come ◆ sulla timeline.</div>';
+    chart.innerHTML = '<div class="gantt-empty">Nessuna attività da mostrare.<br>Scrivi una nota con cliente e progetto (e una scadenza): comparirà qui da sola.</div>';
     return;
   }
 
@@ -2747,6 +2966,13 @@ function renderGanttChart(data) {
     for (const m of _datedStreams(p)) {
       if (!dataMinDate || m.start_date < dataMinDate) dataMinDate = m.start_date;
       if (!dataMaxDate || m.end_date > dataMaxDate) dataMaxDate = m.end_date;
+    }
+    // Gantt derivato dai task: il periodo dei dati è quello delle attività.
+    if (!p.is_background) for (const n of (p.notes || [])) {
+      const s0 = n.start_date || n.due_date || n.created_at;
+      const e0 = n.due_date || n.start_date || n.created_at;
+      if (!dataMinDate || s0 < dataMinDate) dataMinDate = s0;
+      if (!dataMaxDate || e0 > dataMaxDate) dataMaxDate = e0;
     }
   }
   const hasProjectMinDate = !!dataMinDate;
@@ -2771,6 +2997,21 @@ function renderGanttChart(data) {
     const fwd = RANGE_FORWARD_DAYS[ganttRange] ?? 18;
     startD = new Date(_now.getFullYear(), _now.getMonth(), _now.getDate() - 3);
     endD = new Date(_now.getFullYear(), _now.getMonth(), _now.getDate() + fwd);
+    // Vista di default: non deve nascondere lavoro aperto — si estende fino
+    // all'ultima data delle attività non completate (max 6 mesi avanti).
+    if (ganttRange === 'default') {
+      let lastOpen = null;
+      for (const p of data.projects) if (!p.is_background) for (const n of (p.notes || [])) {
+        if (n.status === 'done') continue;
+        const e0 = n.due_date || n.start_date;
+        if (e0 && (!lastOpen || e0 > lastOpen)) lastOpen = e0;
+      }
+      if (lastOpen) {
+        const limit = new Date(_now.getFullYear(), _now.getMonth(), _now.getDate() + 183);
+        const want = new Date(lastOpen + 'T00:00:00'); want.setDate(want.getDate() + 3);
+        if (want > endD) endD = want < limit ? want : limit;
+      }
+    }
   }
   const totalMs = endD - startD;
   const totalDays = totalMs / 86400000;
@@ -3129,6 +3370,8 @@ function renderGanttChart(data) {
       const labelText = `#${n.id} ${n.content}`;
       const doneStyle = n.status === 'done' ? 'opacity:0.45;text-decoration:line-through' : '';
       const isPlainTodo = !n.status || n.status === 'todo';
+      // rosso solo se scaduta e non completata; altrimenti il colore del progetto
+      const taskColor = (n.status !== 'done' && (n.due_date || '9999') < todayStr) ? 'var(--red)' : p.color;
       const markerHtml = hasBar
         ? (() => {
             const barLeft = pct(n.start_date);
@@ -3137,12 +3380,12 @@ function renderGanttChart(data) {
             // Il ✅ va in testa all'etichetta (non in coda): con barre strette il
             // testo viene troncato con "…" e un suffisso finirebbe sempre tagliato.
             const doneBadge = n.status === 'done' ? '✅ ' : '';
-            return `<div class="gantt-bar" style="left:${barLeft}%;width:${barWidth}%;background:var(--red);${n.status==='done'?'opacity:0.55':''}" title="${escHtml(tooltip)}">
+            return `<div class="gantt-bar" style="left:${barLeft}%;width:${barWidth}%;background:${taskColor};color:${taskColor==='var(--red)'?'#fff':_contrastText(p.color)};${n.status==='done'?'opacity:0.55':''}" title="${escHtml(tooltip)}">
                       <span class="gantt-bar-label">${doneBadge}${escHtml(n.content)}</span>
                     </div>`;
           })()
         : (isPlainTodo
-            ? `<div class="gantt-diamond overdue" style="left:${pct(anchor)}%;background:var(--red);" title="${escHtml(tooltip)}"></div>`
+            ? `<div class="gantt-diamond overdue" style="left:${pct(anchor)}%;background:${taskColor};" title="${escHtml(tooltip)}"></div>`
             : `<div class="gantt-note-emoji" style="left:${pct(anchor)}%;" title="${escHtml(tooltip)}">${STATUS_EMOJI[n.status] || '⬜'}</div>`);
       rowsHtml += `
       <div class="gantt-row gantt-notes-row">

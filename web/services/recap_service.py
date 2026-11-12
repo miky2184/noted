@@ -1,7 +1,7 @@
 from collections.abc import Iterator
 from datetime import date
-import os
 
+from ai import llm
 from db import crud
 from db.engine import get_session
 
@@ -10,21 +10,24 @@ class RecapError(Exception):
     status_code = 500
 
 
-class MissingApiKeyError(RecapError):
-    status_code = 400
+class LLMUnavailableError(RecapError):
+    status_code = 503
 
 
 class NoNotesError(RecapError):
     status_code = 404
 
 
-def ensure_api_key() -> None:
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        raise MissingApiKeyError("ANTHROPIC_API_KEY non impostata")
+def ensure_llm() -> None:
+    """Verifica che l'LLM locale (Ollama) risponda prima di avviare un'operazione AI."""
+    try:
+        llm.check_available()
+    except llm.LLMError as exc:
+        raise LLMUnavailableError(str(exc)) from exc
 
 
 def stream_daily_recap(ctx: str) -> Iterator[str]:
-    ensure_api_key()
+    ensure_llm()
 
     with get_session() as session:
         notes = crud.get_notes_for_recap(session, day=date.today(), ctx=ctx)
@@ -37,9 +40,13 @@ def stream_daily_recap(ctx: str) -> Iterator[str]:
 
     def generate() -> Iterator[str]:
         chunks: list[str] = []
-        for chunk in stream_recap(notes, date.today(), gantt=gantt):
-            chunks.append(chunk)
-            yield chunk
+        try:
+            for chunk in stream_recap(notes, date.today(), gantt=gantt):
+                chunks.append(chunk)
+                yield chunk
+        except llm.LLMError as exc:
+            yield f"\n\n⚠️ {exc}"
+            return
 
         with get_session() as session:
             crud.save_recap(
@@ -54,7 +61,7 @@ def stream_daily_recap(ctx: str) -> Iterator[str]:
 
 
 def stream_weekly_recap(ctx: str) -> Iterator[str]:
-    ensure_api_key()
+    ensure_llm()
 
     with get_session() as session:
         notes = crud.get_notes_last_n_days(session, days=7, ctx=ctx)
@@ -67,9 +74,13 @@ def stream_weekly_recap(ctx: str) -> Iterator[str]:
 
     def generate() -> Iterator[str]:
         chunks: list[str] = []
-        for chunk in stream_weekly_from_notes(notes, gantt=gantt):
-            chunks.append(chunk)
-            yield chunk
+        try:
+            for chunk in stream_weekly_from_notes(notes, gantt=gantt):
+                chunks.append(chunk)
+                yield chunk
+        except llm.LLMError as exc:
+            yield f"\n\n⚠️ {exc}"
+            return
 
         with get_session() as session:
             crud.save_recap(

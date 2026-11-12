@@ -217,8 +217,9 @@ def test_board_due_and_gantt_smoke(client):
 
     gantt = client.get("/api/gantt?ctx=work")
     assert gantt.status_code == 200
-    assert gantt.json()["projects"][0]["streams"][0]["name"] == "Release"
-    assert gantt.json()["projects"][0]["streams"][0]["phases"][0]["progress_total"] == 1
+    # Gantt derivato dai task: nessuno Stream/Fase nella vista, solo il progetto
+    assert gantt.json()["projects"][0]["name"] == "ACME"
+    assert gantt.json()["projects"][0]["streams"] == []
 
     invalid_phase = client.post(
         "/api/gantt/phases?ctx=work",
@@ -272,9 +273,9 @@ def test_board_due_and_gantt_smoke(client):
         json={"milestone_id": phase.json()["id"]},
     )
     gantt_after_link = client.get("/api/gantt?ctx=work").json()
-    phase_data = gantt_after_link["projects"][0]["streams"][0]["phases"][0]
-    assert any(n["id"] == linked_note["id"] for n in phase_data["linked_notes"])
-    assert all(n["id"] != linked_note["id"] for n in gantt_after_link["projects"][0]["notes"])
+    # il task agganciato a una (vecchia) Fase compare una sola volta tra le attività del progetto
+    ids = [n["id"] for n in gantt_after_link["projects"][0]["notes"]]
+    assert ids.count(linked_note["id"]) == 1
 
 
 def test_gantt_client_crud(client):
@@ -463,10 +464,8 @@ def test_stream_own_dates_used_only_without_phases(client):
     stream_id = created.json()["id"]
     assert created.json()["start_date"] == "2026-09-01"
 
-    gantt = client.get("/api/gantt?ctx=work").json()
-    stream_data = gantt["projects"][0]["streams"][0]
-    assert stream_data["start_date"] == "2026-09-01"
-    assert stream_data["end_date"] == "2026-09-10"
+    # lo Stream resta nel DB ma non compare più nella vista Gantt derivata
+    assert client.get("/api/gantt?ctx=work").json()["projects"][0]["streams"] == []
 
     # date invertite rifiutate anche in creazione
     invalid = client.post("/api/gantt/streams?ctx=work", json={
@@ -484,19 +483,13 @@ def test_stream_own_dates_used_only_without_phases(client):
         "stream_id": stream_id, "name": "Implementazione",
         "start_date": "2026-10-20", "end_date": "2026-11-30",
     })
-    gantt2 = client.get("/api/gantt?ctx=work").json()
-    stream_data2 = gantt2["projects"][0]["streams"][0]
-    assert stream_data2["start_date"] == "2026-10-01"  # min tra le fasi
-    assert stream_data2["end_date"] == "2026-11-30"     # max tra le fasi
 
     # modificare le date "proprie" dello stream a questo punto non ha effetto
     # visibile nel Gantt (restano superate dall'aggregato delle fasi)
     client.patch(f"/api/gantt/streams/{stream_id}?ctx=work",
                  json={"start_date": "2020-01-01", "end_date": "2020-01-02"})
-    gantt3 = client.get("/api/gantt?ctx=work").json()
-    stream_data3 = gantt3["projects"][0]["streams"][0]
-    assert stream_data3["start_date"] == "2026-10-01"
-    assert stream_data3["end_date"] == "2026-11-30"
+    assert client.patch(f"/api/gantt/streams/{stream_id}?ctx=work",
+                        json={"start_date": "2020-01-01"}).status_code == 200
 
 
 def test_phase_crud_and_cross_context_404(client):
@@ -539,10 +532,7 @@ def test_phase_delete_unlinks_note_not_delete(client):
 
     assert client.delete(f"/api/gantt/phases/{phase['id']}?ctx=work").status_code == 204
 
-    gantt = client.get("/api/gantt?ctx=work").json()
-    # lo Stream sopravvive (contenitore), semplicemente senza più fasi
-    assert gantt["projects"][0]["streams"][0]["phases"] == []
-
+    # la nota resta tra le attività del progetto
     updated_note = next(n for n in client.get("/api/notes?ctx=work").json() if n["id"] == note["id"])
     assert updated_note["milestone_id"] is None
 
@@ -559,14 +549,12 @@ def test_standard_phases_creates_three_templates(client):
     assert names == ["Analisi e Requisiti", "Implementazione", "UAT", "Rilascio in PROD"]
     assert all(ph["start_date"] is None for ph in res.json()["phases"])
 
-    gantt = client.get("/api/gantt?ctx=work").json()
-    phases = gantt["projects"][0]["streams"][0]["phases"]
-    assert [ph["name"] for ph in phases] == ["Analisi e Requisiti", "Implementazione", "UAT", "Rilascio in PROD"]
-
     # chiamarlo una seconda volta aggiunge altre 4 fasi, non sostituisce le esistenti
     client.post("/api/gantt/phases/standard?ctx=work", json={"stream_id": stream["id"]})
-    gantt2 = client.get("/api/gantt?ctx=work").json()
-    assert len(gantt2["projects"][0]["streams"][0]["phases"]) == 8
+    crud = importlib.import_module("db.crud")
+    engine = importlib.import_module("db.engine")
+    with engine.get_session() as session:
+        assert len(crud.get_phases(session, stream["id"])) == 8
 
     # 404 su stream di un altro contesto
     assert client.post("/api/gantt/phases/standard?ctx=home", json={"stream_id": stream["id"]}).status_code == 404
@@ -600,8 +588,12 @@ def test_phases_ordered_by_start_date_not_creation(client):
         "stream_id": stream["id"], "name": "Idea futura",
     }).json()
 
-    gantt = client.get("/api/gantt?ctx=work").json()
-    ids_in_order = [ph["id"] for ph in gantt["projects"][0]["streams"][0]["phases"]]
+    # l'elenco fasi (usato da /api/gantt/streams/all) resta in ordine cronologico
+    import importlib
+    crud = importlib.import_module("db.crud")
+    engine = importlib.import_module("db.engine")
+    with engine.get_session() as session:
+        ids_in_order = [ph.id for ph in crud.get_phases(session, stream["id"])]
     assert ids_in_order == [analisi["id"], implementazione["id"], uat["id"], rilascio["id"], senza_data["id"]]
 
 
@@ -734,7 +726,9 @@ def test_stream_linked_notes_ordered_by_period_not_creation(client):
     }).json()
 
     gantt = client.get("/api/gantt?ctx=work").json()
-    linked = gantt["projects"][0]["streams"][0]["phases"][0]["linked_notes"]
+    # le note agganciate a una vecchia Fase compaiono come attività del progetto
+    # (nome progetto ACME dato dallo Stream), in ordine di periodo
+    linked = gantt["projects"][0]["notes"]
     ids_in_order = [n["id"] for n in linked]
     # earlier (1 agosto) prima di later (15 agosto), nonostante creata dopo;
     # la nota senza data va in coda (fallback sulla data di creazione = oggi)
@@ -758,23 +752,16 @@ def test_note_linked_directly_to_stream_acts_as_phase(client):
     assert note["milestone_id"] is None
 
     gantt = client.get("/api/gantt?ctx=work").json()
-    stream_data = gantt["projects"][0]["streams"][0]
-    assert stream_data["progress_total"] == 1
-    phase_like = stream_data["phases"][0]
-    assert phase_like["name"] == "copertura a supporto FASE2"
-    assert phase_like["start_date"] == "2026-09-01"
-    assert phase_like["end_date"] == "2026-12-31"
-    assert phase_like["is_note"] is True
-    assert phase_like["note_id"] == note["id"]
+    proj = gantt["projects"][0]
+    assert proj["streams"] == []
+    # la nota è un'attività del progetto, con le sue date, una sola volta
+    assert [(n["id"], n["start_date"], n["due_date"]) for n in proj["notes"]] == [
+        (note["id"], "2026-09-01", "2026-12-31")]
 
-    # non deve comparire ANCHE come nota-con-scadenza "libera" del progetto
-    # (sarebbe una duplicazione: è già rappresentata come fase dello stream)
-    assert gantt["projects"][0]["notes"] == []
-
-    # segnarla "done" alza il progress dello stream
+    # segnarla "done" alza il progress del progetto
     client.patch(f"/api/notes/{note['id']}?ctx=work", json={"status": "done"})
     gantt2 = client.get("/api/gantt?ctx=work").json()
-    assert gantt2["projects"][0]["streams"][0]["progress"] == 100
+    assert gantt2["projects"][0]["progress"] == 100
 
     # milestone_id e stream_id sono mutuamente esclusivi
     phase = client.post("/api/gantt/phases?ctx=work",
@@ -820,14 +807,9 @@ def test_stream_dateless_and_note_link_progress(client):
     client.patch(f"/api/notes/{n2['id']}?ctx=work", json={"milestone_id": phase_id})
 
     gantt = client.get("/api/gantt?ctx=work").json()
-    stream_data = gantt["projects"][0]["streams"][0]
-    phase_data = stream_data["phases"][0]
-    assert stream_data["progress_total"] == 2
-    assert stream_data["progress_done"] == 1
-    assert stream_data["progress"] == 50
-    assert phase_data["progress_total"] == 2
-    assert phase_data["progress"] == 50
-    assert {n["id"] for n in phase_data["linked_notes"]} == {n1["id"], n2["id"]}
+    proj = gantt["projects"][0]
+    assert proj["tasks_total"] == 2 and proj["tasks_done"] == 1 and proj["progress"] == 50
+    assert {n["id"] for n in proj["notes"]} == {n1["id"], n2["id"]}
 
     # aggiungere le date dopo deve funzionare (fase creata senza, valorizzata in seguito)
     dated = client.patch(f"/api/gantt/phases/{phase_id}?ctx=work",
@@ -838,9 +820,8 @@ def test_stream_dateless_and_note_link_progress(client):
     # clear_milestone rimuove la nota dalla fase
     client.patch(f"/api/notes/{n2['id']}?ctx=work", json={"clear_milestone": True})
     gantt2 = client.get("/api/gantt?ctx=work").json()
-    phase_data2 = gantt2["projects"][0]["streams"][0]["phases"][0]
-    assert phase_data2["progress_total"] == 1
-    assert phase_data2["progress"] == 100
+    proj2 = gantt2["projects"][0]
+    assert proj2["tasks_total"] == 1 and proj2["progress"] == 100
 
 
 def test_project_progress_aggregates_all_streams(client):
@@ -1075,8 +1056,9 @@ def test_milestone_tracking_note_hidden_from_board_and_activity(client):
     assert real_note["id"] in notes_ids
     assert all(n["content"] != "Release" for n in notes)
 
+    # la nota di tracking dello Stream non è un'attività: resta fuori dal Gantt
     gantt = client.get("/api/gantt?ctx=work").json()
-    assert gantt["projects"][0]["streams"][0]["name"] == "Release"
+    assert all(n["content"] != "Release" for p in gantt["projects"] for n in p["notes"])
 
 
 def test_document_upload_list_download_and_delete(client, tmp_path):
@@ -1174,20 +1156,9 @@ def test_analyze_docs_accepts_folder_scanned_files(client, monkeypatch, tmp_path
     doc_root.mkdir(exist_ok=True)
     (doc_root / "appunti.txt").write_text("testo di prova per l'analisi")
 
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-
-    class _FakeContent:
-        text = '{"summary": "ok", "insights": [], "items": []}'
-    class _FakeResponse:
-        content = [_FakeContent()]
-    class _FakeMessages:
-        def create(self_inner, **kwargs):
-            return _FakeResponse()
-    class _FakeAnthropic:
-        def __init__(self_inner, *a, **kw):
-            self_inner.messages = _FakeMessages()
-
-    monkeypatch.setattr("anthropic.Anthropic", _FakeAnthropic)
+    llm = importlib.import_module("ai.llm")
+    monkeypatch.setattr(llm, "generate_json",
+                        lambda *a, **kw: {"summary": "ok", "insights": [], "items": []})
 
     res = client.post("/api/analyze-docs", json={
         "doc_ids": [], "folder_paths": ["appunti.txt"], "depth": "low",
@@ -1301,37 +1272,50 @@ def test_restore_db_is_atomic_and_creates_pre_restore_backup(client, tmp_path):
     assert original_rows == [("original",)]
 
 
-def test_recap_requires_api_key(client, monkeypatch):
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+def _llm_down(monkeypatch):
+    llm = importlib.import_module("ai.llm")
+
+    def _boom():
+        raise llm.LLMUnavailable("Ollama non raggiungibile. Avvialo con: ollama serve")
+    monkeypatch.setattr(llm, "check_available", _boom)
+
+
+def _llm_up(monkeypatch):
+    llm = importlib.import_module("ai.llm")
+    monkeypatch.setattr(llm, "check_available", lambda: None)
+
+
+def test_recap_requires_local_llm(client, monkeypatch):
+    _llm_down(monkeypatch)
     res = client.post("/api/recap?ctx=work")
-    assert res.status_code == 400
-    assert res.json()["detail"] == "ANTHROPIC_API_KEY non impostata"
+    assert res.status_code == 503
+    assert "Ollama" in res.json()["detail"]
 
 
-def test_email_draft_requires_api_key(client, monkeypatch):
+def test_email_draft_requires_local_llm(client, monkeypatch):
     note = client.post("/api/notes?ctx=work", json={"content": "chiedere aggiornamento a Marco"}).json()
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    _llm_down(monkeypatch)
     res = client.post(f"/api/notes/{note['id']}/email-draft?ctx=work", json={})
-    assert res.status_code == 400
-    assert res.json()["detail"] == "ANTHROPIC_API_KEY non impostata"
+    assert res.status_code == 503
+    assert "Ollama" in res.json()["detail"]
 
 
 def test_email_draft_404_on_missing_or_cross_context_note(client, monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    _llm_up(monkeypatch)
     note = client.post("/api/notes?ctx=work", json={"content": "nota"}).json()
     assert client.post("/api/notes/999999/email-draft?ctx=work", json={}).status_code == 404
     assert client.post(f"/api/notes/{note['id']}/email-draft?ctx=home", json={}).status_code == 404
 
 
 def test_email_draft_rejects_empty_note_without_draft(client, monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    _llm_up(monkeypatch)
     note = client.post("/api/notes?ctx=work", json={"content": "   "}).json()
     res = client.post(f"/api/notes/{note['id']}/email-draft?ctx=work", json={})
     assert res.status_code == 400
 
 
 def test_email_draft_generates_saves_and_reuses_without_calling_ai_again(client, monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    _llm_up(monkeypatch)
     email_module = importlib.import_module("ai.email_draft")
     calls = []
     monkeypatch.setattr(
@@ -1369,7 +1353,7 @@ def test_email_draft_generates_saves_and_reuses_without_calling_ai_again(client,
 
 
 def test_daily_recap_streams_and_saves(client, monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    _llm_up(monkeypatch)
     recap_module = importlib.import_module("ai.recap")
     monkeypatch.setattr(recap_module, "stream_recap", lambda notes, target_date, gantt=None: iter(["daily", " recap"]))
 
@@ -1385,7 +1369,7 @@ def test_daily_recap_streams_and_saves(client, monkeypatch):
 
 
 def test_weekly_recap_streams_and_saves(client, monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    _llm_up(monkeypatch)
     recap_module = importlib.import_module("ai.recap")
     monkeypatch.setattr(recap_module, "stream_weekly_from_notes", lambda notes, gantt=None: iter(["weekly", " recap"]))
 

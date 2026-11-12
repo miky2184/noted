@@ -282,15 +282,13 @@ def recap(
     """Genera un recap AI delle note del giorno (o della settimana)."""
     _init()
 
-    try:
-        from ai.recap import stream_recap, stream_weekly_recap
-    except ImportError:
-        console.print("[red]anthropic non installato. Esegui: pip install anthropic[/red]")
-        raise typer.Exit(1)
+    from ai import llm
+    from ai.recap import stream_recap, stream_weekly_recap
 
-    import os
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        console.print("[red]ANTHROPIC_API_KEY non impostata. Aggiungila al file .env[/red]")
+    try:
+        llm.check_available()
+    except llm.LLMError as exc:
+        console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
 
     with get_session() as session:
@@ -463,28 +461,23 @@ def setup_https():
     console.print("  noted restart")
 
 
-# ── SET-MODEL ──────────────────────────────────────────────────────────────────
+# ── MODEL ──────────────────────────────────────────────────────────────────────
 
 @app.command(name="set-model")
 def set_model(
-    model: str = typer.Argument(..., help="Modello: haiku | sonnet | opus"),
+    model: str = typer.Argument(..., help="Nome del modello Ollama (es. llama3.2)"),
 ):
-    """Imposta il modello AI usato per i recap."""
-    from db.config import MODELS, set_model as _set, get_model
-    if model not in MODELS:
-        console.print(f"[red]Modello non valido. Scegli tra: {', '.join(MODELS)}[/red]")
-        raise typer.Exit(1)
-    _set(MODELS[model])
-    console.print(f"✅ Modello impostato: [cyan]{model}[/cyan] ({MODELS[model]})")
+    """Imposta il modello Ollama locale usato per le funzioni AI."""
+    from db.config import set_ollama_model
+    set_ollama_model(model.strip())
+    console.print(f"✅ Modello impostato: [cyan]{model}[/cyan]")
 
 
 @app.command(name="model")
 def show_model():
-    """Mostra il modello AI attualmente selezionato."""
-    from db.config import get_model, MODELS
-    current = get_model()
-    label = next((k for k, v in MODELS.items() if v == current), current)
-    console.print(f"🤖 Modello attivo: [cyan]{label}[/cyan] ({current})")
+    """Mostra il modello Ollama attualmente selezionato."""
+    from db.config import get_ollama_model, get_ollama_url
+    console.print(f"🤖 Modello attivo: [cyan]{get_ollama_model()}[/cyan] ({get_ollama_url()})")
 
 
 @app.command()

@@ -1,4 +1,4 @@
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Optional
 from sqlmodel import SQLModel, Field, JSON, Column
 import json
@@ -10,7 +10,7 @@ STATUSES = ("backlog", "todo", "discuss", "wip", "waiting", "blocked", "done")
 class Context(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(unique=True)
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Note(SQLModel, table=True):
@@ -26,8 +26,8 @@ class Note(SQLModel, table=True):
     assignee: Optional[str] = None
     context: str = Field(default="default", index=True)
     sort_order: int = Field(default=0)
-    created_at: datetime = Field(default_factory=datetime.now, index=True)
-    updated_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     # Nome legacy: la colonna si chiamava "milestone_id" quando puntava allo Stream
     # (poi rinominato da Milestone); ora punta alla Fase (Phase) dentro lo Stream —
     # mantiene il nome fisico originale per evitare di toccare la tabella note via
@@ -55,7 +55,7 @@ class Recap(SQLModel, table=True):
     summary: str
     notes_count: int = 0
     context: str = Field(default="default")
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Client(SQLModel, table=True):
@@ -63,7 +63,7 @@ class Client(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
     context: str = Field(default="default", index=True)
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Absence(SQLModel, table=True):
@@ -75,7 +75,7 @@ class Absence(SQLModel, table=True):
     end_date: date
     color: Optional[str] = None
     context: str = Field(default="default", index=True)
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class GanttProject(SQLModel, table=True):
@@ -88,7 +88,7 @@ class GanttProject(SQLModel, table=True):
     client_id: Optional[int] = Field(default=None, foreign_key="client.id", index=True)
     start_date: Optional[date] = None
     end_date: Optional[date] = None
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Stream(SQLModel, table=True):
@@ -103,7 +103,7 @@ class Stream(SQLModel, table=True):
     name: str
     start_date: Optional[date] = None
     end_date: Optional[date] = None
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Phase(SQLModel, table=True):
@@ -119,7 +119,7 @@ class Phase(SQLModel, table=True):
     end_date: Optional[date] = None
     note_id: Optional[int] = Field(default=None, foreign_key="note.id")
     sort_order: int = Field(default=0)
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class NoteDependency(SQLModel, table=True):
@@ -127,7 +127,7 @@ class NoteDependency(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     note_id: int = Field(foreign_key="note.id")
     blocker_id: int = Field(foreign_key="note.id")
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Document(SQLModel, table=True):
@@ -139,4 +139,18 @@ class Document(SQLModel, table=True):
     size_bytes: Optional[int] = None
     sha256: Optional[str] = None
     analysis: Optional[str] = None    # summary AI salvato dopo analisi
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class Link(SQLModel, table=True):
+    """Link salvato (OneDrive, Google Drive, SharePoint, pagine web...) con
+    cliente/progetto opzionali. Nasce a mano oppure in automatico dagli URL
+    incollati nelle note (note_id = nota di origine)."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    url: str
+    title: str = Field(default="")
+    cliente: Optional[str] = Field(default=None, index=True)
+    project: Optional[str] = None
+    note_id: Optional[int] = Field(default=None, foreign_key="note.id")
+    context: str = Field(default="default", index=True)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)

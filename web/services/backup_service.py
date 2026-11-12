@@ -9,7 +9,7 @@ from sqlmodel import delete as sql_delete, select
 
 from db import crud
 from db.engine import DATABASE_URL, engine, get_session, init_db
-from db.models import Context, Document, GanttProject, Stream, Note, NoteDependency, Recap
+from db.models import Context, Document, GanttProject, Link, Stream, Note, NoteDependency, Recap
 
 
 def sqlite_backup_filename() -> str:
@@ -36,6 +36,7 @@ def export_json_data() -> dict:
         streams = session.exec(select(Stream)).all()
         documents = session.exec(select(Document)).all()
         dependencies = session.exec(select(NoteDependency)).all()
+        links = session.exec(select(Link)).all()
 
     return {
         "exported_at": date.today().isoformat(),
@@ -91,6 +92,12 @@ def export_json_data() -> dict:
              "created_at": dep.created_at.isoformat()}
             for dep in dependencies
         ],
+        "links": [
+            {"id": l.id, "url": l.url, "title": l.title, "cliente": l.cliente,
+             "project": l.project, "note_id": l.note_id, "context": l.context,
+             "created_at": l.created_at.isoformat()}
+            for l in links
+        ],
     }
 
 
@@ -103,6 +110,10 @@ def restore_json_data(body: dict) -> None:
         # dangling Document/NoteDependency rows behind
         session.exec(sql_delete(Document))
         session.exec(sql_delete(NoteDependency))
+        # un backup precedente all'introduzione dei link non li contiene:
+        # in quel caso si lasciano i link attuali invece di cancellarli
+        if "links" in body:
+            session.exec(sql_delete(Link))
         session.exec(sql_delete(Stream))
         session.exec(sql_delete(GanttProject))
         session.exec(sql_delete(Recap))
@@ -163,6 +174,14 @@ def restore_json_data(body: dict) -> None:
                 size_bytes=d.get("size_bytes"), sha256=d.get("sha256"),
                 analysis=d.get("analysis"),
                 created_at=datetime.fromisoformat(d["created_at"]),
+            ))
+
+        for l in body.get("links", []):
+            session.add(Link(
+                id=l["id"], url=l["url"], title=l.get("title", ""), cliente=l.get("cliente"),
+                project=l.get("project"), note_id=l.get("note_id"),
+                context=l.get("context", "default"),
+                created_at=datetime.fromisoformat(l["created_at"]),
             ))
 
         for dep in body.get("dependencies", []):

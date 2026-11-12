@@ -1,15 +1,7 @@
-import os
 from datetime import date, timedelta
 from typing import Optional, Iterator
-from anthropic import Anthropic
+from ai import llm
 from db.models import Note
-
-client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-
-
-def _model() -> str:
-    from db.config import get_model
-    return get_model()
 
 
 def _format_notes(notes: list[Note]) -> str:
@@ -115,13 +107,7 @@ def stream_recap(notes: list[Note], target_date: Optional[date] = None,
         gantt=gantt_text,
     )
 
-    with client.messages.stream(
-        model=_model(),
-        max_tokens=1200,
-        messages=[{"role": "user", "content": prompt}],
-    ) as stream:
-        for text in stream.text_stream:
-            yield text
+    yield from llm.stream(prompt, num_predict=1200, num_ctx=llm.ctx_for(prompt, 1200))
 
 
 def generate_recap(notes: list[Note], target_date: Optional[date] = None,
@@ -131,13 +117,7 @@ def generate_recap(notes: list[Note], target_date: Optional[date] = None,
 
 def stream_weekly_recap(recaps_text: str) -> Iterator[str]:
     prompt = WEEKLY_PROMPT.format(recaps=recaps_text)
-    with client.messages.stream(
-        model=_model(),
-        max_tokens=800,
-        messages=[{"role": "user", "content": prompt}],
-    ) as stream:
-        for text in stream.text_stream:
-            yield text
+    yield from llm.stream(prompt, num_predict=800, num_ctx=llm.ctx_for(prompt, 800))
 
 
 def generate_weekly_recap(recaps_text: str) -> str:
@@ -162,10 +142,4 @@ def stream_weekly_from_notes(notes: list[Note],
     gantt_text = _format_gantt(gantt, date.today())
     prompt = WEEKLY_NOTES_PROMPT.format(notes=notes_text.strip(), gantt=gantt_text)
 
-    with client.messages.stream(
-        model=_model(),
-        max_tokens=1400,
-        messages=[{"role": "user", "content": prompt}],
-    ) as stream:
-        for text in stream.text_stream:
-            yield text
+    yield from llm.stream(prompt, num_predict=1400, num_ctx=llm.ctx_for(prompt, 1400))

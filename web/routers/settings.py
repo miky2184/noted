@@ -78,22 +78,6 @@ async def api_local_ip(request: Request):
     return {"url": f"{scheme}://{ip}:{port}", "ip": ip, "port": port}
 
 
-@router.get("/api/config/model")
-async def api_get_model():
-    from db.config import get_model, MODELS
-    current = get_model()
-    return {"model": current, "label": next((k for k, v in MODELS.items() if v == current), current)}
-
-@router.post("/api/config/model")
-async def api_set_model(body: dict):
-    from db.config import MODELS, set_model
-    model_id = body.get("model", "")
-    if model_id not in MODELS.values():
-        raise HTTPException(status_code=400, detail="Modello non valido")
-    set_model(model_id)
-    return {"model": model_id}
-
-
 class ScheduleConfig(BaseModel):
     time: str
     days: List[int]

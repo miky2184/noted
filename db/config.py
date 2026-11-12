@@ -2,13 +2,6 @@ import json
 from datetime import date, timedelta
 from pathlib import Path
 
-MODELS = {
-    "haiku":  "claude-haiku-4-5-20251001",
-    "sonnet": "claude-sonnet-4-6",
-    "opus":   "claude-opus-4-7",
-}
-DEFAULT_MODEL = "claude-sonnet-4-6"
-
 
 def _config_path() -> Path:
     from db.paths import config_path
@@ -29,16 +22,6 @@ def _save(data: dict) -> None:
     p = _config_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(data, indent=2))
-
-
-def get_model() -> str:
-    return _load().get("model", DEFAULT_MODEL)
-
-
-def set_model(model_id: str) -> None:
-    data = _load()
-    data["model"] = model_id
-    _save(data)
 
 
 def get_port() -> int:
@@ -86,6 +69,9 @@ def get_ollama_url() -> str:
     return _load().get("ollama_url", "http://localhost:11434")
 
 def set_ollama_url(url: str) -> None:
+    from ai.llm import is_local_url
+    if not is_local_url(url):
+        raise ValueError("L'endpoint LLM deve essere locale (localhost o rete privata)")
     data = _load(); data["ollama_url"] = url.rstrip("/"); _save(data)
 
 def get_ollama_model() -> str:
@@ -93,6 +79,18 @@ def get_ollama_model() -> str:
 
 def set_ollama_model(model: str) -> None:
     data = _load(); data["ollama_model"] = model; _save(data)
+
+
+def get_ollama_num_ctx() -> int:
+    """Finestra di contesto richiesta a Ollama. Il default di Ollama (4096)
+    tronca in silenzio i prompt lunghi (recap di giornate piene, Q&A)."""
+    return int(_load().get("ollama_num_ctx", 8192))
+
+
+def get_update_check_enabled() -> bool:
+    """Controllo aggiornamenti su GitHub: chiamata di rete in uscita, quindi
+    disattivato di default (opt-in)."""
+    return bool(_load().get("update_check_enabled", False))
 
 
 def get_fiscal_year_start_month() -> int:

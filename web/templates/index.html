@@ -12,10 +12,10 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="noted">
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
-<link rel="stylesheet" href="/static/css/app.css">
+<script src="/static/vendor/marked.min.js"></script>
+<script src="/static/vendor/purify.min.js"></script>
+<script src="/static/vendor/Sortable.min.js"></script>
+<link rel="stylesheet" href="/static/css/app.css?v={{ asset_v }}">
 
 </head>
 <body>
@@ -38,9 +38,10 @@
 
   <div class="tabs">
     <button class="tab-btn active" id="tab-notes" onclick="switchTab('notes')">📝 Note</button>
-    <button class="tab-btn" id="tab-activity" onclick="switchTab('activity')">📌 Attività</button>
+    <button class="tab-btn" id="tab-activity" onclick="switchTab('activity')">🏠 Oggi</button>
     <button class="tab-btn" id="tab-board" onclick="switchTab('board')">🗂 Board</button>
     <button class="tab-btn" id="tab-gantt" onclick="switchTab('gantt')">📊 Gantt</button>
+    <button class="tab-btn" id="tab-links" onclick="switchTab('links')">🔗 Link</button>
     <button class="tab-btn" id="tab-docs" onclick="switchTab('docs')">📎 Analisi</button>
     <button class="tab-btn" id="tab-editor" onclick="switchTab('editor')">✍️ Editor</button>
   </div>
@@ -126,8 +127,8 @@
     <span class="mobile-nav-label">Note</span>
   </button>
   <button class="mobile-nav-btn" id="mnav-activity" onclick="switchTab('activity')">
-    <span class="mobile-nav-icon">📌</span>
-    <span class="mobile-nav-label">Attività</span>
+    <span class="mobile-nav-icon">🏠</span>
+    <span class="mobile-nav-label">Oggi</span>
   </button>
   <button class="mobile-nav-btn" id="mnav-board" onclick="switchTab('board')">
     <span class="mobile-nav-icon">🗂</span>
@@ -136,6 +137,10 @@
   <button class="mobile-nav-btn" id="mnav-gantt" onclick="switchTab('gantt')">
     <span class="mobile-nav-icon">📊</span>
     <span class="mobile-nav-label">Gantt</span>
+  </button>
+  <button class="mobile-nav-btn" id="mnav-links" onclick="switchTab('links')">
+    <span class="mobile-nav-icon">🔗</span>
+    <span class="mobile-nav-label">Link</span>
   </button>
   <button class="mobile-nav-btn" id="mnav-docs" onclick="switchTab('docs')">
     <span class="mobile-nav-icon">📎</span>
@@ -162,7 +167,7 @@
         <datalist id="cliente-datalist"></datalist>
         <input type="text" id="note-project" list="project-datalist" placeholder="progetto" maxlength="60" autocomplete="off" onfocus="_refreshProjectDatalist()">
         <datalist id="project-datalist"></datalist>
-        <input type="text" id="note-stream" list="stream-datalist" placeholder="fase (opzionale)" maxlength="120" autocomplete="off">
+        <input type="text" id="note-stream" list="stream-datalist" placeholder="fase (opzionale)" maxlength="120" autocomplete="off" style="display:none">
         <datalist id="stream-datalist"></datalist>
         <input type="text" id="note-assignee" placeholder="@persona1 @persona2" maxlength="120">
         <input type="date" id="note-start" title="Data inizio" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-family:inherit;font-size:0.78rem;padding:4px 8px;outline:none;width:130px;transition:border-color 0.15s;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
@@ -209,13 +214,45 @@
          oggi, che iniziano oggi, o senza nessuna data. -->
     <div id="view-activity" style="display:none;">
       <div class="section-header">
-        <span class="section-title">Attività di oggi</span>
+        <span class="section-title">Oggi</span>
         <button id="activity-done-btn" onclick="toggleActivityShowDone()" title="Mostra/nascondi completate"
           style="margin-left:auto;background:none;border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:0.7rem;color:var(--text-muted);cursor:pointer;white-space:nowrap;transition:all 0.15s;">
           👁 done
         </button>
       </div>
+      <div style="display:flex;gap:6px;margin:8px 0;">
+        <input id="ask-input" class="gantt-input" style="flex:1;min-width:0;width:auto;padding:8px 12px;" placeholder="Chiedi alle tue note… (es. cosa abbiamo deciso sul rilascio?)"
+               onkeydown="if(event.key==='Enter') askNotes()">
+        <button class="gantt-btn" style="width:auto;flex:none;padding:8px 16px;" onclick="askNotes()">🔎 Chiedi</button>
+      </div>
+      <div id="ask-answer" style="display:none;margin-bottom:12px;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;font-size:0.85rem;line-height:1.5;"></div>
+      <div id="overview-box"></div>
       <div id="activity-list"></div>
+    </div>
+
+    <!-- Link: raccoglitore di link per cliente/progetto -->
+    <div id="view-links" style="display:none;">
+      <div class="section-header">
+        <span class="section-title">Link</span>
+        <span class="count-badge" id="links-count">0</span>
+        <button class="gantt-btn-sm" style="margin-left:auto;" onclick="importLinksFromNotes()" title="Cerca gli URL già presenti nelle tue note">↻ Trova nelle note</button>
+      </div>
+      <form id="link-add-form" onsubmit="addLink(event)" style="display:grid;grid-template-columns:2fr 1.4fr 1fr 1fr auto;gap:6px;margin:8px 0;">
+        <input class="gantt-input" id="link-url" placeholder="Incolla il link (OneDrive, Drive, SharePoint…)" required style="width:auto;min-width:0;">
+        <input class="gantt-input" id="link-title" placeholder="Nome" style="width:auto;min-width:0;">
+        <input class="gantt-input" id="link-cliente" list="cliente-datalist" placeholder="cliente" autocomplete="off" oninput="_refreshProjectDatalist()" style="width:auto;min-width:0;">
+        <input class="gantt-input" id="link-project" list="project-datalist" placeholder="progetto" autocomplete="off" onfocus="_refreshProjectDatalist()" style="width:auto;min-width:0;">
+        <button class="gantt-btn" type="submit" style="width:auto;padding:5px 14px;">Salva</button>
+      </form>
+      <div style="display:flex;gap:6px;margin:6px 0 10px;">
+        <input class="gantt-input" id="links-search" placeholder="Cerca per nome, cliente, progetto o indirizzo…" oninput="loadLinksDebounced()" style="flex:1;width:auto;min-width:0;">
+        <select class="gantt-zoom-btn" id="links-sort" onchange="loadLinks()" title="Ordinamento">
+          <option value="recent">Più recenti</option>
+          <option value="cliente">Cliente → progetto</option>
+          <option value="title">Nome A–Z</option>
+        </select>
+      </div>
+      <div id="links-list"></div>
     </div>
 
     <!-- Board view -->
@@ -224,7 +261,7 @@
         <input class="board-filter-input board-filter-wide" id="board-q-filter" placeholder="cerca nella board" onkeydown="if(event.key==='Enter') loadBoard()">
         <input class="board-filter-input" id="board-cliente-filter" placeholder="filtra per cliente" onkeydown="if(event.key==='Enter') loadBoard()">
         <input class="board-filter-input" id="board-project-filter" placeholder="filtra per progetto" onkeydown="if(event.key==='Enter') loadBoard()">
-        <input class="board-filter-input" id="board-phase-filter" list="stream-datalist" placeholder="filtra per fase/stream" autocomplete="off" onchange="loadBoard()" onkeydown="if(event.key==='Enter') loadBoard()">
+        <input class="board-filter-input" id="board-phase-filter" style="display:none" list="stream-datalist" placeholder="filtra per fase/stream" autocomplete="off" onchange="loadBoard()" onkeydown="if(event.key==='Enter') loadBoard()">
         <input class="board-filter-input" id="board-tag-filter" placeholder="#tag" onkeydown="if(event.key==='Enter') loadBoard()">
         <input class="board-filter-input" id="board-assignee-filter" placeholder="filtra per @persona" onkeydown="if(event.key==='Enter') loadBoard()">
         <select class="board-filter-input" id="board-priority-filter" onchange="loadBoard()" title="Priorità">
@@ -395,7 +432,7 @@
         <div class="gantt-chart-area">
           <div style="display:flex;gap:4px;padding:8px 12px 0;justify-content:flex-end;align-items:center;">
             <select id="gantt-range-select" class="gantt-zoom-btn" onchange="setGanttRange(this.value)" title="Periodo visualizzato" style="margin-right:6px;">
-              <option value="default" selected>Ultimi giorni + prossime settimane</option>
+              <option value="default" selected>Automatico (fino all'ultima scadenza aperta)</option>
               <option value="week">Prossima settimana</option>
               <option value="2weeks">Prossime 2 settimane</option>
               <option value="3weeks">Prossime 3 settimane</option>
@@ -425,11 +462,6 @@
     <div class="sidebar-section">
       <div class="section-header">
         <span class="section-title">Recap AI</span>
-        <select id="model-select" style="margin-left:auto;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-family:inherit;font-size:0.72rem;padding:2px 6px;outline:none;cursor:pointer;" onchange="setModel(this.value)">
-          <option value="claude-haiku-4-5-20251001">⚡ Haiku 4.5</option>
-          <option value="claude-sonnet-4-6">✦ Sonnet 4.6</option>
-          <option value="claude-opus-4-7">◆ Opus 4.7</option>
-        </select>
         <button id="gen-daily-btn" onclick="generateRecap()" title="Genera recap di oggi" style="background:var(--accent-dim);border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:3px 10px;font-size:0.72rem;font-weight:600;cursor:pointer;transition:opacity 0.15s;">🤖 Daily</button>
         <button id="gen-weekly-btn" onclick="generateWeeklyRecap()" title="Genera recap settimanale" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:6px;padding:3px 10px;font-size:0.72rem;cursor:pointer;transition:all 0.15s;">📅 Weekly</button>
       </div>
@@ -708,6 +740,6 @@ window.NOTED_BOOT = {
   recapSummary: {% if recap %}{{ recap.summary | tojson }}{% else %}null{% endif %}
 };
 </script>
-<script src="/static/js/app.js"></script>
+<script src="/static/js/app.js?v={{ asset_v }}"></script>
 </body>
 </html>

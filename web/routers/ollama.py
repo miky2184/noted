@@ -163,7 +163,10 @@ async def api_get_ollama_settings():
 async def api_set_ollama_settings(body: OllamaSettings):
     from db.config import set_ollama_url, set_ollama_model
     if body.url is not None:
-        set_ollama_url(body.url.strip())
+        try:
+            set_ollama_url(body.url.strip())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     if body.model is not None:
         set_ollama_model(body.model.strip())
     return {"ok": True}

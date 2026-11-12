@@ -273,9 +273,9 @@ class _ScanDoc:
 
 @router.post("/api/analyze-docs")
 async def api_analyze_docs(request: Request, body: AnalyzeDocsRequest):
-    import base64, json as _json
-    from db.config import get_doc_root, get_model
-    from anthropic import Anthropic
+    import base64
+    from db.config import get_doc_root
+    from ai import llm
 
     total_selected = len(body.doc_ids) + len(body.folder_paths)
     if not total_selected:
@@ -290,8 +290,6 @@ async def api_analyze_docs(request: Request, body: AnalyzeDocsRequest):
     max_tokens        = limits["max_tokens"]
 
     doc_root = Path(get_doc_root()).expanduser()
-    client = Anthropic()
-    model = get_model()
 
     with get_session() as session:
         docs = [session.get(Document, did) for did in body.doc_ids]
@@ -300,8 +298,8 @@ async def api_analyze_docs(request: Request, body: AnalyzeDocsRequest):
     if not docs:
         raise HTTPException(status_code=404, detail="Documenti non trovati")
 
-    # Build message content — mix text blocks and image blocks
-    content_parts: list = []
+    # Prompt testuale + eventuali immagini (usate solo da modelli Ollama con visione)
+    images: list[str] = []
     docs_block_lines: list[str] = []
     total_chars = 0
 
@@ -321,17 +319,8 @@ async def api_analyze_docs(request: Request, body: AnalyzeDocsRequest):
                 )
                 continue
             img_data = base64.standard_b64encode(img_bytes).decode()
-            media_type = doc.mime_type or "image/png"
-            if media_type not in ("image/jpeg", "image/png", "image/gif", "image/webp"):
-                media_type = "image/png"
-            content_parts.append({
-                "type": "text",
-                "text": f"--- Documento: {doc.orig_name} (immagine) ---"
-            })
-            content_parts.append({
-                "type": "image",
-                "source": {"type": "base64", "media_type": media_type, "data": img_data}
-            })
+            images.append(img_data)
+            docs_block_lines.append(f"--- Documento: {doc.orig_name} (immagine allegata) ---")
         else:
             remaining = max_total_chars - total_chars
             if remaining <= 0:
@@ -352,31 +341,16 @@ async def api_analyze_docs(request: Request, body: AnalyzeDocsRequest):
         today=today_str,
     ) + extra
 
-    content_parts.append({"type": "text", "text": user_text})
-
     try:
         loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
+        result = await loop.run_in_executor(
             None,
-            partial(
-                client.messages.create,
-                model=model,
-                max_tokens=max_tokens,
-                system=_ANALYSIS_SYSTEM,
-                messages=[{"role": "user", "content": content_parts}],
-            ),
+            partial(llm.generate_json, user_text, system=_ANALYSIS_SYSTEM,
+                    images=images or None, num_predict=max_tokens,
+                    num_ctx=llm.ctx_for(user_text, max_tokens)),
         )
-        raw = response.content[0].text.strip()
-        if raw.startswith("```"):
-            raw = raw.split("```", 2)[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-            raw = raw.rsplit("```", 1)[0].strip()
-        result = _json.loads(raw)
-    except _json.JSONDecodeError:
-        raise HTTPException(status_code=500, detail="Il modello non ha restituito JSON valido")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except llm.LLMError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
 
     # Persist analysis on the document when a single, real (uploaded) doc was
     # analysed — un file trovato solo via folder-scan non ha una riga Document

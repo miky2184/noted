@@ -11,8 +11,7 @@ Note di lavoro giornaliere con recap AI, board kanban, Gantt e gestione contesti
 ## Requisiti
 
 - Python 3.11+
-- Una API key Anthropic (per i recap AI) → [console.anthropic.com](https://console.anthropic.com)
-- **Opzionale:** [Ollama](https://ollama.com) per l'elaborazione AI locale delle note (auto-tagging, riscrittura)
+- [Ollama](https://ollama.com) per tutte le funzioni AI (recap, domande alle note, bozze email, analisi documenti). Funziona solo in locale: nessun dato lascia la macchina.
 
 ---
 
@@ -65,13 +64,9 @@ pip install -e '.[dev]'        # opzionale: test
 
 Con il venv manuale il comando `noted` è disponibile solo dopo `source .venv/bin/activate`.
 
-### 3. Configura la API key
+### 3. AI locale
 
-```bash
-echo "ANTHROPIC_API_KEY=sk-ant-..." > .env
-```
-
-> Senza API key i recap AI non funzionano, ma tutto il resto (note, board, Gantt, scadenze) sì.
+Le funzioni AI usano esclusivamente Ollama (endpoint locale: l'app rifiuta URL non locali). Senza Ollama tutto il resto (note, board, Gantt, scadenze) funziona comunque.
 
 ### 4. (Opzionale) Installa Ollama per l'AI locale
 
@@ -262,7 +257,7 @@ Eliminare un Cliente, un Progetto, uno Stream o una Fase non cancella mai le not
 - Salvataggio automatico al termine di ogni generazione
 - Lista "Ultimi recap" nella sidebar aggiornata dinamicamente dopo ogni generazione
 - Click su un recap → caricato nella box senza ricaricare la pagina; orario visibile per distinguere più recap dello stesso giorno
-- Selezione modello AI: ⚡ Haiku 4.5 · ✦ Sonnet 4.6 · ◆ Opus 4.7
+- Modello AI: quello Ollama configurato nelle Impostazioni
 - **⏰ Recap automatico** — schedulazione giornaliera o settimanale con orario e giorni della settimana configurabili dalla UI
 
 ### Gestione documenti
@@ -475,9 +470,7 @@ Coprono API principali, ricerca full-text, isolamento contesti, documenti, backu
 
 ```bash
 noted model                         # modello attivo
-noted set-model haiku               # veloce ed economico
-noted set-model sonnet              # bilanciato (default)
-noted set-model opus                # più potente
+noted set-model llama3.2            # qualsiasi modello Ollama installato
 ```
 
 ### Servizio
@@ -510,7 +503,7 @@ noted/
 │   ├── config.py        # configurazione (modello AI, porta)
 │   └── paths.py         # percorsi dati cross-platform (platformdirs)
 ├── ai/
-│   └── recap.py         # Anthropic API streaming + integrazione dati Gantt
+│   └── recap.py         # recap via LLM locale (Ollama) + integrazione dati Gantt
 ├── web/
 │   ├── app.py           # FastAPI + tutti gli endpoint REST
 │   └── templates/

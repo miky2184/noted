@@ -1,8 +1,8 @@
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from sqlmodel import Session, select
-from sqlalchemy import or_, and_, delete as sa_delete, update as sa_update, text
-from db.models import Note, Recap, GanttProject, Context, NoteDependency, Document, Client, Stream, Phase, Absence
+from sqlalchemy import func, or_, and_, delete as sa_delete, update as sa_update, text
+from db.models import Link, Note, Recap, GanttProject, Context, NoteDependency, Document, Client, Stream, Phase, Absence
 
 
 # ── Context ────────────────────────────────────────────────────────────────────
@@ -157,8 +157,8 @@ def get_notes(
     stmt = select(Note).where(Note.context == ctx)
 
     if day:
-        start = datetime.combine(day, datetime.min.time())
-        end = datetime.combine(day, datetime.max.time())
+        start = datetime.combine(day, datetime.min.time()).replace(tzinfo=timezone.utc)
+        end = datetime.combine(day, datetime.max.time()).replace(tzinfo=timezone.utc)
         stmt = stmt.where(Note.created_at >= start, Note.created_at <= end)
 
     if tag:
@@ -261,7 +261,7 @@ def edit_note(
     elif stream_id is not None:
         note.stream_id = stream_id
         note.milestone_id = None
-    note.updated_at = datetime.now()
+    note.updated_at = datetime.now(timezone.utc)
     session.add(note)
     session.commit()
     session.refresh(note)
@@ -326,7 +326,7 @@ def get_inbox_notes(
     ctx: str = "default",
     limit: int = 50,
 ) -> list[Note]:
-    since = datetime.combine(date.today() - timedelta(days=days), datetime.min.time())
+    since = datetime.combine(date.today() - timedelta(days=days), datetime.min.time()).replace(tzinfo=timezone.utc)
     stmt = (
         select(Note)
         .where(Note.status.is_(None), Note.context == ctx)
@@ -389,8 +389,8 @@ def _apply_board_filters(
             Note.assignee.ilike(q),
         ))
     if created_today:
-        start = datetime.combine(date.today(), datetime.min.time())
-        end = datetime.combine(date.today(), datetime.max.time())
+        start = datetime.combine(date.today(), datetime.min.time()).replace(tzinfo=timezone.utc)
+        end = datetime.combine(date.today(), datetime.max.time()).replace(tzinfo=timezone.utc)
         stmt = stmt.where(Note.created_at >= start, Note.created_at <= end)
     if due_filter == "has":
         stmt = stmt.where(Note.due_date.isnot(None))
@@ -410,7 +410,7 @@ def _apply_board_filters(
 
 
 def get_notes_last_n_days(session: Session, days: int = 7, ctx: str = "default") -> list[Note]:
-    since = datetime.combine(date.today() - timedelta(days=days), datetime.min.time())
+    since = datetime.combine(date.today() - timedelta(days=days), datetime.min.time()).replace(tzinfo=timezone.utc)
     stmt = (
         select(Note)
         .where(Note.created_at >= since, Note.context == ctx)
@@ -783,7 +783,7 @@ def edit_phase(
                 note.due_date = None
             elif end_date is not None:
                 note.due_date = end_date
-            note.updated_at = datetime.now()
+            note.updated_at = datetime.now(timezone.utc)
             session.add(note)
     session.add(ph); session.commit(); session.refresh(ph)
     return ph
@@ -872,10 +872,19 @@ def edit_gantt_project(
 
 def delete_gantt_project(session: Session, project_id: int) -> bool:
     """Elimina il progetto e i suoi Stream/Fasi. Note collegate alle fasi restano,
-    solo scollegate (milestone_id -> NULL) — niente viene cancellato oltre a
+    solo scollegate (milestone_id -> NULL, project -> NULL) — niente viene cancellato oltre a
     progetto, Stream e Fasi."""
     p = session.get(GanttProject, project_id)
     if not p: return False
+    # Le note sono la fonte di verità dei progetti (_reconcile_projects_from_notes
+    # li ricrea ad ogni lettura del Gantt): senza scollegare anche il nome
+    # progetto dalle note, il progetto eliminato "risorge" subito. Il testo e
+    # il cliente delle note restano intatti.
+    session.exec(
+        sa_update(Note)
+        .where(Note.context == p.context, func.lower(Note.project) == p.name.lower())
+        .values(project=None)
+    )
     stream_ids = session.exec(
         select(Stream.id).where(Stream.project_id == project_id)
     ).all()
@@ -1199,46 +1208,39 @@ def get_gantt_data(session: Session, ctx: str = "default") -> dict:
             "phases": phases_data,
         }, stream_done_total, stream_notes_total
 
+    # Gantt DERIVATO dai task: ogni progetto mostra semplicemente le sue note
+    # (attività) — nessuna struttura Stream/Fase da mantenere a mano. Le
+    # tabelle stream/phase restano nel DB (dati storici, nessuna migrazione
+    # distruttiva): le note che vi erano agganciate compaiono comunque come
+    # attività del progetto.
     result = []
     for p in projects:
-        streams = [] if p.is_background else get_streams(session, p.id)
-        # Ogni nota del progetto non già rappresentata altrove (Fase o Stream
-        # diretto) — anche senza alcuna data, o con solo start_date: deve
-        # comunque comparire nel Gantt (il frontend la piazza sulla data che
-        # ha, o sulla data di creazione in mancanza di entrambe).
-        notes_with_due_stmt = (
-            select(Note)
-            .where(Note.context == ctx)
-            .where(Note.project.ilike(p.name))
-            .where(Note.milestone_id.is_(None))
-            .where(Note.stream_id.is_(None))
-        )
-        notes_with_due = session.exec(_exclude_milestone_tag(notes_with_due_stmt)).all()
-        notes_with_due.sort(key=_note_period_key)
+        if p.is_background:
+            streams_data = []
+            notes_with_due = []
+            all_proj_notes = []
+        else:
+            stream_ids = session.exec(select(Stream.id).where(Stream.project_id == p.id)).all()
+            phase_ids = (session.exec(select(Phase.id).where(Phase.stream_id.in_(stream_ids))).all()
+                         if stream_ids else [])
+            linked = [Note.project.ilike(p.name)]
+            if stream_ids:
+                linked.append(Note.stream_id.in_(stream_ids))
+            if phase_ids:
+                linked.append(Note.milestone_id.in_(phase_ids))
+            stmt = select(Note).where(Note.context == ctx, or_(*linked))
+            all_proj_notes = session.exec(_exclude_milestone_tag(stmt)).all()
+            notes_with_due = sorted(all_proj_notes, key=_note_period_key)
+            streams_data = []
 
-        # All notes of this project (to check risk)
-        all_proj_notes = session.exec(
-            select(Note).where(Note.context == ctx, Note.project.ilike(p.name))
-        ).all()
-
-        # A project has a risk blocker if any of its notes is:
-        # - in a blocking status AND is itself a blocker of another note (has dependents)
+        # Un progetto è a rischio se una sua nota bloccata/in attesa blocca altre note.
         has_risk_blocker = any(
             n.status in ("blocked", "waiting", "backlog") and n.id in blocker_ids_in_use
             for n in all_proj_notes
         )
-
-        proj_done_total = 0
-        proj_notes_total = 0
-
-        streams_data = []
-        for s in streams:
-            data, done, total = _stream_data(s, p.name)
-            streams_data.append(data)
-            proj_done_total += done
-            proj_notes_total += total
-
-        project_progress = round(proj_done_total / proj_notes_total * 100) if proj_notes_total else 0
+        total = len(all_proj_notes)
+        done = sum(1 for n in all_proj_notes if n.status == "done")
+        project_progress = round(done / total * 100) if total else 0
 
         result.append({
             "id": p.id,
@@ -1252,6 +1254,8 @@ def get_gantt_data(session: Session, ctx: str = "default") -> dict:
             "end_date": str(p.end_date) if p.end_date else None,
             "streams": streams_data,
             "progress": project_progress,
+            "tasks_total": total,
+            "tasks_done": done,
             "notes": [
                 {"id": n.id, "content": n.content, "due_date": str(n.due_date) if n.due_date else None, "status": n.status,
                  "start_date": str(n.start_date) if n.start_date else None,
@@ -1268,3 +1272,266 @@ def get_gantt_data(session: Session, ctx: str = "default") -> dict:
             for a in absences
         ],
     }
+
+
+# ── Overview "Oggi" e retrieval per Q&A ───────────────────────────────────────
+
+_OPEN_STATUSES = ("todo", "discuss", "wip", "waiting", "blocked")
+_STOPWORDS = {
+    "che", "cosa", "come", "con", "per", "del", "della", "dello", "dei", "delle", "degli", "nel",
+    "nella", "nei", "sul", "sulla", "sui", "alla", "alle", "agli", "una", "uno", "gli", "sono",
+    "ancora", "abbiamo", "ho", "devo", "ultimo", "ultima", "ultimi", "quali", "quale", "quanto",
+    "dove", "quando", "chi", "mio", "mia", "miei", "tra", "fra", "anche", "stato", "stati",
+}
+
+
+def get_overview(session: Session, ctx: str = "default", stale_days: int = 7) -> dict:
+    """Colpo d'occhio per la schermata Oggi, calcolato dagli stessi task/note
+    (nessuna struttura parallela): in corso, in attesa/bloccati, fermi da
+    `stale_days` giorni, conteggio inbox (note non classificate recenti) e
+    note più recenti."""
+    open_stmt = _exclude_milestone_tag(
+        select(Note).where(Note.context == ctx, Note.status.in_(_OPEN_STATUSES))
+    )
+    open_notes = session.exec(open_stmt).all()
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=stale_days)
+
+    def _naive(dt: datetime) -> datetime:
+        return dt.replace(tzinfo=None) if dt.tzinfo else dt
+
+    wip = [n for n in open_notes if n.status == "wip"]
+    waiting = [n for n in open_notes if n.status in ("waiting", "blocked")]
+    stale = sorted(
+        (n for n in open_notes if _naive(n.updated_at or n.created_at) < cutoff),
+        key=lambda n: _naive(n.updated_at or n.created_at),
+    )
+    projects: dict[str, int] = {}
+    for n in open_notes:
+        if n.project:
+            projects[n.project] = projects.get(n.project, 0) + 1
+
+    inbox = get_inbox_notes(session, days=7, ctx=ctx, limit=200)
+    recent = session.exec(
+        _exclude_milestone_tag(select(Note).where(Note.context == ctx))
+        .order_by(Note.created_at.desc()).limit(5)
+    ).all()
+    return {
+        "wip": wip, "waiting": waiting, "stale": stale[:10], "recent": recent,
+        "inbox_count": len(inbox), "open_count": len(open_notes),
+        "projects": sorted(projects.items(), key=lambda kv: -kv[1])[:8],
+    }
+
+
+def search_notes_any(session: Session, query: str, ctx: str = "default", limit: int = 12) -> list[Note]:
+    """Retrieval per domande in linguaggio naturale: i termini significativi
+    sono in OR (la ricerca normale li vuole tutti in AND, quindi una domanda
+    intera non troverebbe nulla). FTS5 con ranking bm25; ripiego su LIKE."""
+    import re
+
+    terms = [t for t in re.findall(r"[\w]+", query.lower(), flags=re.UNICODE)
+             if len(t) >= 3 and t not in _STOPWORDS]
+    if not terms:
+        return []
+    try:
+        rows = session.execute(
+            text("""
+                SELECT note.id
+                FROM note_fts
+                JOIN note ON note.id = note_fts.rowid
+                WHERE note_fts MATCH :query AND note.context = :ctx
+                ORDER BY bm25(note_fts), note.created_at DESC
+                LIMIT :limit
+            """),
+            {"query": " OR ".join(f"{t}*" for t in terms), "ctx": ctx, "limit": limit},
+        ).all()
+        ids = [r[0] for r in rows]
+        if ids:
+            by_id = {n.id: n for n in session.exec(select(Note).where(Note.id.in_(ids))).all()}
+            return [by_id[i] for i in ids if i in by_id]
+        return []
+    except Exception:
+        stmt = select(Note).where(
+            Note.context == ctx,
+            or_(*[Note.content.ilike(f"%{t}%") for t in terms]),
+        ).order_by(Note.created_at.desc()).limit(limit)
+        return session.exec(stmt).all()
+
+
+def get_notes_between(session: Session, start: date, end: date, ctx: str = "default", limit: int = 20) -> list[Note]:
+    lo = datetime.combine(start, datetime.min.time()).replace(tzinfo=timezone.utc)
+    hi = datetime.combine(end, datetime.max.time()).replace(tzinfo=timezone.utc)
+    stmt = (
+        _exclude_milestone_tag(select(Note).where(Note.context == ctx))
+        .where(Note.created_at >= lo, Note.created_at <= hi)
+        .order_by(Note.created_at.desc()).limit(limit)
+    )
+    return session.exec(stmt).all()
+
+
+# ── Link ───────────────────────────────────────────────────────────────────────
+
+_URL_RE = None
+
+
+def extract_urls(text_: str) -> list[str]:
+    """URL http(s) presenti nel testo, senza punteggiatura finale, senza doppioni."""
+    import re
+    global _URL_RE
+    if _URL_RE is None:
+        _URL_RE = re.compile(r"https?://[^\s<>\"'\])]+", re.IGNORECASE)
+    seen, out = set(), []
+    for m in _URL_RE.findall(text_ or ""):
+        url = m.rstrip(".,;:!?)")
+        if url and url not in seen:
+            seen.add(url)
+            out.append(url)
+    return out
+
+
+def link_source(url: str) -> str:
+    """Etichetta breve della provenienza (OneDrive, Google Drive, SharePoint, dominio)."""
+    from urllib.parse import urlparse
+    host = (urlparse(url).hostname or "").lower()
+    if host.endswith("sharepoint.com"):
+        return "SharePoint"
+    if host in ("1drv.ms", "onedrive.live.com") or host.endswith("onedrive.com"):
+        return "OneDrive"
+    if host in ("drive.google.com", "docs.google.com", "sheets.google.com", "slides.google.com"):
+        return "Google Drive"
+    return host.removeprefix("www.") or "web"
+
+
+def _title_from_note(content: str, url: str) -> str:
+    """Nome proposto: il testo della nota senza URL (prima riga utile), altrimenti la provenienza."""
+    stripped = content
+    for u in extract_urls(content):
+        stripped = stripped.replace(u, " ")
+    for line in stripped.splitlines():
+        line = " ".join(line.split()).strip(" -:·")
+        if line:
+            return line[:80]
+    return link_source(url)
+
+
+def add_link(session: Session, url: str, title: str = "", cliente: Optional[str] = None,
+             project: Optional[str] = None, note_id: Optional[int] = None, ctx: str = "default") -> Link:
+    link = Link(url=url.strip(), title=(title or "").strip(), cliente=cliente or None,
+                project=project or None, note_id=note_id, context=ctx)
+    if not link.title:
+        link.title = link_source(link.url)
+    session.add(link)
+    session.commit()
+    session.refresh(link)
+    return link
+
+
+def sync_links_from_note(session: Session, note: Note) -> int:
+    """Salva come Link gli URL contenuti nella nota. Idempotente: un URL già
+    presente nel contesto non viene duplicato (se manca cliente/progetto, lo
+    eredita dalla nota — senza mai sovrascrivere ciò che l'utente ha impostato)."""
+    created = 0
+    for url in extract_urls(note.content):
+        existing = session.exec(
+            select(Link).where(Link.context == note.context, Link.url == url)
+        ).first()
+        if existing:
+            changed = False
+            if not existing.cliente and note.cliente:
+                existing.cliente, changed = note.cliente, True
+            if not existing.project and note.project:
+                existing.project, changed = note.project, True
+            if changed:
+                session.add(existing)
+                session.commit()
+            continue
+        add_link(session, url, title=_title_from_note(note.content, url),
+                 cliente=note.cliente, project=note.project, note_id=note.id, ctx=note.context)
+        created += 1
+    return created
+
+
+def get_links(session: Session, ctx: str = "default", query: str = "",
+              cliente: Optional[str] = None, project: Optional[str] = None,
+              sort: str = "recent") -> list[Link]:
+    stmt = select(Link).where(Link.context == ctx)
+    if cliente:
+        stmt = stmt.where(Link.cliente.ilike(cliente))
+    if project:
+        stmt = stmt.where(Link.project.ilike(project))
+    for term in query.split():
+        like = f"%{term}%"
+        stmt = stmt.where(or_(Link.title.ilike(like), Link.url.ilike(like),
+                              Link.cliente.ilike(like), Link.project.ilike(like)))
+    if sort == "title":
+        stmt = stmt.order_by(func.lower(Link.title).asc())
+    elif sort == "cliente":
+        stmt = stmt.order_by(Link.cliente.is_(None), func.lower(Link.cliente).asc(),
+                             func.lower(Link.project).asc(), func.lower(Link.title).asc())
+    else:
+        stmt = stmt.order_by(Link.created_at.desc())
+    return session.exec(stmt).all()
+
+
+def get_link_for_ctx(session: Session, link_id: int, ctx: str) -> Optional[Link]:
+    link = session.get(Link, link_id)
+    return link if link and link.context == ctx else None
+
+
+def edit_link(session: Session, link_id: int, ctx: str, url: Optional[str] = None,
+              title: Optional[str] = None, cliente: Optional[str] = None,
+              project: Optional[str] = None) -> Optional[Link]:
+    link = get_link_for_ctx(session, link_id, ctx)
+    if not link:
+        return None
+    if url is not None:
+        link.url = url.strip()
+    if title is not None:
+        link.title = title.strip() or link_source(link.url)
+    if cliente is not None:
+        link.cliente = cliente.strip() or None
+    if project is not None:
+        link.project = project.strip() or None
+    session.add(link)
+    session.commit()
+    session.refresh(link)
+    return link
+
+
+def delete_link(session: Session, link_id: int, ctx: str) -> bool:
+    link = get_link_for_ctx(session, link_id, ctx)
+    if not link:
+        return False
+    session.delete(link)
+    session.commit()
+    return True
+
+
+URGENCY_LABELS = ["🔴 Scaduti", "🟠 In scadenza (7 giorni)", "🟡 Priorità alta", "🔵 In corso", "⚪ Altri aperti"]
+
+
+def urgency_band(n: Note, today: Optional[date] = None) -> int:
+    """0 scaduto · 1 scade entro 7 giorni · 2 priorità alta · 3 in corso · 4 altro."""
+    today = today or date.today()
+    if n.due_date and n.due_date < today:
+        return 0
+    if n.due_date and n.due_date <= today + timedelta(days=7):
+        return 1
+    if n.priority == "high":
+        return 2
+    if n.status == "wip":
+        return 3
+    return 4
+
+
+def get_priority_tasks(session: Session, ctx: str = "default", limit: int = 12) -> list[Note]:
+    """Task aperti in ordine di urgenza (v. urgency_band), poi per scadenza e priorità.
+    Serve alle domande su "cosa devo fare / priorità / scadenze"."""
+    today = date.today()
+    notes = session.exec(
+        _exclude_milestone_tag(
+            select(Note).where(Note.context == ctx, Note.status.in_(_OPEN_STATUSES))
+        )
+    ).all()
+    prio = {"high": 0, "medium": 1, "low": 2}
+    return sorted(notes, key=lambda n: (urgency_band(n, today), n.due_date or date.max,
+                                        prio.get(n.priority, 1), n.created_at.replace(tzinfo=None)))[:limit]
